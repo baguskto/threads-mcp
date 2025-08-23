@@ -38,9 +38,26 @@ export class ThreadsAPIClient {
     );
   }
 
-  async get<T>(endpoint: string, params?: Record<string, any>): Promise<T> {
-    const response = await this.client.get<T>(endpoint, { params });
-    return response.data;
+  async get<T>(endpoint: string, params?: Record<string, any>, retries = 3): Promise<T> {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const response = await this.client.get<T>(endpoint, { params });
+        return response.data;
+      } catch (error: any) {
+        const isTransientError = error.response?.data?.error?.is_transient === true;
+        const isCode2Error = error.response?.data?.error?.code === 2;
+        const isLastAttempt = attempt === retries;
+        
+        if ((isTransientError || isCode2Error) && !isLastAttempt) {
+          console.error(`Attempt ${attempt} failed with transient error, retrying in ${attempt * 1000}ms...`);
+          await this.sleep(attempt * 1000); // Exponential backoff
+          continue;
+        }
+        
+        throw error;
+      }
+    }
+    throw new Error('Max retries exceeded');
   }
 
   async post<T>(endpoint: string, data?: Record<string, any>): Promise<T> {
@@ -78,5 +95,9 @@ export class ThreadsAPIClient {
 
   updateAccessToken(token: string) {
     this.accessToken = token;
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }

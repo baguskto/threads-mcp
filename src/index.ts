@@ -178,7 +178,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'get_user_profile':
         const { userId, fields } = args as any;
         const fieldsParam = fields?.join(',') || 'id,username,name,threads_profile_picture_url,threads_biography';
-        result = await apiClient.get(`/${userId}`, { fields: fieldsParam });
+        
+        try {
+          result = await apiClient.get(`/${userId}`, { fields: fieldsParam });
+        } catch (error: any) {
+          // Enhanced error handling for external user access
+          const errorCode = error.response?.data?.error?.code;
+          const errorMessage = error.response?.data?.error?.message;
+          
+          if (errorCode === 2) {
+            result = {
+              error: 'Access Denied',
+              code: 2,
+              userId: userId,
+              message: 'This user profile is private or requires additional permissions',
+              suggestions: [
+                'This user may have privacy settings that prevent profile access',
+                'Try accessing your own profile with /me endpoint',
+                'Ensure you have the necessary permissions for this user',
+                'Check if the user has approved your app access'
+              ],
+              note: 'Threads API limits access to external user profiles for privacy protection'
+            };
+          } else {
+            throw error;
+          }
+        }
         break;
 
       case 'resolve_username':
@@ -292,13 +317,39 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'get_user_threads':
         const { userId: threadUserId, fields: userThreadFields, limit } = args as any;
         const threadsFields = userThreadFields?.join(',') || 'id,media_type,media_url,text,timestamp,permalink,username,is_quote_post';
-        result = await apiClient.paginate(
-          `/${threadUserId}/threads`,
-          {
-            fields: threadsFields,
-            limit: limit || 25,
+        
+        try {
+          result = await apiClient.paginate(
+            `/${threadUserId}/threads`,
+            {
+              fields: threadsFields,
+              limit: limit || 25,
+            }
+          );
+        } catch (error: any) {
+          // Enhanced error handling for external user threads access
+          const errorCode = error.response?.data?.error?.code;
+          
+          if (errorCode === 2) {
+            result = {
+              error: 'Access Denied',
+              code: 2,
+              userId: threadUserId,
+              message: 'Cannot access threads from this user',
+              threads: [],
+              suggestions: [
+                'This user may have privacy settings that prevent threads access',
+                'Try accessing your own threads using your user ID',
+                'Some users require mutual following or app approval',
+                'Public figures may have restricted API access'
+              ],
+              note: 'Threads API limits access to external user threads for privacy protection',
+              workaround: 'Use resolve_username and search_user_threads for your own content analysis'
+            };
+          } else {
+            throw error;
           }
-        );
+        }
         break;
 
       case 'search_user_threads':
