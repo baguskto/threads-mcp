@@ -1,6 +1,6 @@
 {
   "name": "threads-mcp-server",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Meta Threads MCP Server for comprehensive API access and data analysis",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

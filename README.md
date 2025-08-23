@@ -67,6 +67,13 @@ Add the server to your Claude Desktop configuration:
 
 #### User Management
 
+- **get_current_user**: Get the authenticated user's profile
+  ```typescript
+  {
+    userFields?: string[];
+  }
+  ```
+
 - **get_user_profile**: Retrieve a user's Threads profile information
   ```typescript
   {
@@ -75,10 +82,11 @@ Add the server to your Claude Desktop configuration:
   }
   ```
 
-- **get_current_user**: Get the authenticated user's profile
+- **resolve_username**: Convert username to user ID (NEW! 🚀)
   ```typescript
   {
-    userFields?: string[];
+    username: string;
+    method?: 'search' | 'profile_lookup' | 'mention_search';
   }
   ```
 
@@ -87,91 +95,26 @@ Add the server to your Claude Desktop configuration:
   {
     userId: string;
     fields?: string[];
-    since?: string;
-    until?: string;
     limit?: number;
   }
   ```
 
-#### Content Tools
+#### Search & Discovery Tools
 
-- **get_media_object**: Get details of a specific thread/media object
-  ```typescript
-  {
-    mediaId: string;
-    mediaFields?: string[];
-  }
-  ```
-
-- **get_replies**: Retrieve replies to a specific thread
-  ```typescript
-  {
-    mediaId: string;
-    fields?: string[];
-    reverse?: boolean;
-    since?: string;
-    until?: string;
-  }
-  ```
-
-- **get_conversation**: Get full conversation thread
-  ```typescript
-  {
-    conversationId: string;
-    fields?: string[];
-    reverse?: boolean;
-  }
-  ```
-
-- **manage_reply**: Hide or show replies (moderation)
-  ```typescript
-  {
-    replyId: string;
-    hide: boolean;
-  }
-  ```
-
-- **get_publishing_limit**: Check posting quotas and limits
-  ```typescript
-  {
-    limitUserId: string;
-  }
-  ```
-
-#### Analytics Tools
-
-- **get_media_insights**: Retrieve performance metrics for specific posts
-  ```typescript
-  {
-    mediaId: string;
-    metrics: string[];
-    period?: string;
-    since?: string;
-    until?: string;
-  }
-  ```
-
-- **get_account_insights**: Get account-level analytics
+- **search_user_threads**: Search within a specific user's threads (NEW! 🔍)
   ```typescript
   {
     userId: string;
-    metrics: string[];
-    period?: string;
-    since?: string;
-    until?: string;
+    query: string;
+    limit?: number;
   }
   ```
 
-#### Search Tools
-
-- **search_threads**: Search for threads by keyword or hashtag
+- **get_thread_details**: Get detailed information about a specific thread (NEW! 📄)
   ```typescript
   {
-    query: string;
-    type?: 'top' | 'recent';
-    count?: number;
-    since?: string;
-    until?: string;
+    threadId: string;
+    fields?: string[];
   }
   ```
 
@@ -200,46 +143,73 @@ Add the server to your Claude Desktop configuration:
 
 ## Examples
 
-### Basic User Analysis
+### NEW! Username to User ID Resolution 🚀
 ```javascript
-// Get user profile
+// Resolve any username to get their User ID
+const resolution = await tools.resolve_username({
+  username: "zuck",
+  method: "profile_lookup"
+});
+// Returns: { success: true, userId: "7541850075452114403", username: "zuck" }
+
+const mosseri = await tools.resolve_username({
+  username: "mosseri"
+});
+// Returns: { success: true, userId: "7541850195850986616", username: "mosseri" }
+```
+
+### Advanced User Analysis Workflow
+```javascript
+// 1. Resolve username to ID
+const user = await tools.resolve_username({ username: "zuck" });
+
+// 2. Get their profile (if accessible)
 const profile = await tools.get_user_profile({
-  userId: "12345",
+  userId: user.userId,
   fields: ["id", "username", "name", "threads_biography"]
 });
 
-// Get recent threads
+// 3. Get their recent threads
 const threads = await tools.get_user_threads({
-  userId: "12345",
-  limit: 50,
-  since: "2024-01-01"
+  userId: user.userId,
+  limit: 50
+});
+
+// 4. Search within their threads
+const aiPosts = await tools.search_user_threads({
+  userId: user.userId,
+  query: "artificial intelligence",
+  limit: 100
 });
 ```
 
-### Content Performance Analysis
+### Thread Deep Dive Analysis
 ```javascript
-// Get thread insights
-const insights = await tools.get_media_insights({
-  mediaId: "thread123",
-  metrics: ["views", "likes", "replies"],
-  period: "lifetime"
+// Get detailed thread information
+const threadDetails = await tools.get_thread_details({
+  threadId: "thread_12345",
+  fields: ["id", "text", "media_url", "timestamp", "children"]
 });
 
-// Get account analytics
-const analytics = await tools.get_account_insights({
-  userId: "12345",
-  metrics: ["followers_count", "posts_count"],
-  period: "days_28"
+// Search your own threads
+const myThreads = await tools.search_user_threads({
+  userId: "your_user_id",
+  query: "project",
+  limit: 50
 });
 ```
 
-### Search and Discovery
+### Basic User Analysis
 ```javascript
-// Search for threads
-const results = await tools.search_threads({
-  query: "#technology",
-  type: "recent",
-  count: 25
+// Get your current profile
+const profile = await tools.get_current_user({
+  userFields: ["id", "username", "name"]
+});
+
+// Get your recent threads
+const threads = await tools.get_user_threads({
+  userId: profile.id,
+  limit: 25
 });
 ```
 
