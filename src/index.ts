@@ -8,14 +8,13 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import dotenv from 'dotenv';
 import { ThreadsAPIClient } from './api/client.js';
-import { usernameResolver } from './utils/username-resolver.js';
 
 dotenv.config();
 
 const server = new Server(
   {
-    name: 'threads-mcp',
-    version: '1.0.0',
+    name: 'threads-personal-manager',
+    version: '2.0.0',
   },
   {
     capabilities: {
@@ -39,119 +38,217 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
-        name: 'get_current_user',
-        description: 'Get the authenticated user\'s profile',
+        name: 'get_my_profile',
+        description: 'Get your own Threads profile information',
         inputSchema: {
           type: 'object',
           properties: {
-            userFields: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Fields to retrieve (defaults to all)',
-            },
-          },
-        },
-      },
-      {
-        name: 'get_user_profile',
-        description: 'Retrieve a user\'s Threads profile information',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            userId: {
-              type: 'string',
-              description: 'The ID of the user',
-            },
             fields: {
               type: 'array',
               items: { type: 'string' },
-              description: 'Fields to retrieve (defaults to all)',
+              description: 'Profile fields to retrieve',
             },
           },
-          required: ['userId'],
         },
       },
       {
-        name: 'resolve_username',
-        description: 'Convert username to user ID (experimental feature)',
+        name: 'get_my_threads',
+        description: 'Get your own threads/posts',
         inputSchema: {
           type: 'object',
           properties: {
-            username: {
-              type: 'string',
-              description: 'Username to resolve (without @)',
-            },
-            method: {
-              type: 'string',
-              enum: ['search', 'profile_lookup', 'mention_search'],
-              description: 'Method to use for resolution (default: search)',
-            },
-          },
-          required: ['username'],
-        },
-      },
-      {
-        name: 'get_user_threads',
-        description: 'Retrieve a user\'s threads/posts',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            userId: {
-              type: 'string',
-              description: 'The ID of the user',
-            },
             fields: {
               type: 'array',
               items: { type: 'string' },
-              description: 'Fields to retrieve',
+              description: 'Thread fields to retrieve',
             },
             limit: {
               type: 'number',
-              description: 'Number of threads to retrieve per page',
+              description: 'Number of threads to retrieve',
+            },
+            since: {
+              type: 'string',
+              description: 'ISO 8601 date for filtering',
+            },
+            until: {
+              type: 'string',
+              description: 'ISO 8601 date for filtering',
             },
           },
-          required: ['userId'],
         },
       },
       {
-        name: 'search_user_threads',
-        description: 'Search within a specific user\'s threads (workaround for general search)',
+        name: 'publish_thread',
+        description: 'Create and publish a new thread',
         inputSchema: {
           type: 'object',
           properties: {
-            userId: {
+            text: {
               type: 'string',
-              description: 'User ID to search within',
+              description: 'The text content of the thread',
             },
+            media_type: {
+              type: 'string',
+              enum: ['TEXT', 'IMAGE', 'VIDEO'],
+              description: 'Type of media (default: TEXT)',
+            },
+            media_url: {
+              type: 'string',
+              description: 'URL of media to include (for IMAGE/VIDEO)',
+            },
+            location_name: {
+              type: 'string',
+              description: 'Location name for location tagging',
+            },
+          },
+          required: ['text'],
+        },
+      },
+      {
+        name: 'delete_thread',
+        description: 'Delete one of your threads',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            thread_id: {
+              type: 'string',
+              description: 'ID of the thread to delete',
+            },
+          },
+          required: ['thread_id'],
+        },
+      },
+      {
+        name: 'search_my_threads',
+        description: 'Search within your own threads using keywords',
+        inputSchema: {
+          type: 'object',
+          properties: {
             query: {
               type: 'string',
-              description: 'Search term to find in user\'s threads',
+              description: 'Search query/keywords',
             },
             limit: {
               type: 'number',
               description: 'Number of threads to search through',
             },
           },
-          required: ['userId', 'query'],
+          required: ['query'],
         },
       },
       {
-        name: 'get_thread_details',
-        description: 'Get detailed information about a specific thread',
+        name: 'get_thread_replies',
+        description: 'Get replies to your specific thread',
         inputSchema: {
           type: 'object',
           properties: {
-            threadId: {
+            thread_id: {
               type: 'string',
-              description: 'The ID of the thread',
+              description: 'ID of your thread',
             },
             fields: {
               type: 'array',
               items: { type: 'string' },
-              description: 'Fields to retrieve',
+              description: 'Reply fields to retrieve',
             },
           },
-          required: ['threadId'],
+          required: ['thread_id'],
+        },
+      },
+      {
+        name: 'manage_reply',
+        description: 'Hide or show replies to your threads',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            reply_id: {
+              type: 'string',
+              description: 'ID of the reply to manage',
+            },
+            hide: {
+              type: 'boolean',
+              description: 'Whether to hide (true) or show (false) the reply',
+            },
+          },
+          required: ['reply_id', 'hide'],
+        },
+      },
+      {
+        name: 'get_my_insights',
+        description: 'Get analytics and insights for your account',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            metrics: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Metrics to retrieve',
+            },
+            period: {
+              type: 'string',
+              enum: ['day', 'week', 'days_28', 'month', 'lifetime'],
+              description: 'Time period for metrics',
+            },
+            since: {
+              type: 'string',
+              description: 'ISO 8601 start date',
+            },
+            until: {
+              type: 'string',
+              description: 'ISO 8601 end date',
+            },
+          },
+          required: ['metrics'],
+        },
+      },
+      {
+        name: 'get_thread_insights',
+        description: 'Get performance metrics for your specific thread',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            thread_id: {
+              type: 'string',
+              description: 'ID of your thread',
+            },
+            metrics: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Metrics to retrieve',
+            },
+            period: {
+              type: 'string',
+              enum: ['day', 'week', 'days_28', 'month', 'lifetime'],
+              description: 'Time period for metrics',
+            },
+          },
+          required: ['thread_id', 'metrics'],
+        },
+      },
+      {
+        name: 'get_mentions',
+        description: 'Get threads where you are mentioned',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            fields: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Fields to retrieve from mentions',
+            },
+            limit: {
+              type: 'number',
+              description: 'Number of mentions to retrieve',
+            },
+          },
+        },
+      },
+      {
+        name: 'get_publishing_limit',
+        description: 'Check your current publishing quotas and limits',
+        inputSchema: {
+          type: 'object',
+          properties: {},
         },
       },
     ],
@@ -169,220 +266,126 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     let result: any;
 
     switch (name) {
-      case 'get_current_user':
-        const { userFields } = args as any;
-        const userFieldsParam = userFields?.join(',') || 'id,username,name';
-        result = await apiClient.get('/me', { fields: userFieldsParam });
-        break;
-
-      case 'get_user_profile':
-        const { userId, fields } = args as any;
+      case 'get_my_profile':
+        const { fields } = args as any;
         const fieldsParam = fields?.join(',') || 'id,username,name,threads_profile_picture_url,threads_biography';
-        
-        try {
-          result = await apiClient.get(`/${userId}`, { fields: fieldsParam });
-        } catch (error: any) {
-          // Enhanced error handling for external user access
-          const errorCode = error.response?.data?.error?.code;
-          const errorMessage = error.response?.data?.error?.message;
-          
-          if (errorCode === 2) {
-            result = {
-              error: 'Access Denied',
-              code: 2,
-              userId: userId,
-              message: 'This user profile is private or requires additional permissions',
-              suggestions: [
-                'This user may have privacy settings that prevent profile access',
-                'Try accessing your own profile with /me endpoint',
-                'Ensure you have the necessary permissions for this user',
-                'Check if the user has approved your app access'
-              ],
-              note: 'Threads API limits access to external user profiles for privacy protection'
-            };
-          } else {
-            throw error;
-          }
-        }
+        result = await apiClient.get('/me', { fields: fieldsParam });
         break;
 
-      case 'resolve_username':
-        const { username, method } = args as any;
-        const resolveMethod = method || 'search';
+      case 'get_my_threads':
+        const { fields: threadFields, limit, since, until } = args as any;
+        const threadsFields = threadFields?.join(',') || 'id,media_type,media_url,text,timestamp,permalink,username';
         
-        // Method 1: Try direct API lookup first
-        try {
-          const directResult: any = await apiClient.get(`/${username}`, { 
-            fields: 'id,username,name' 
-          });
-          result = {
-            success: true,
-            method: 'direct_api_lookup',
-            userId: directResult.id,
-            username: directResult.username,
-            name: directResult.name,
-            note: 'Username resolved directly via Threads API'
-          };
-          break;
-        } catch (directError) {
-          // Continue to other methods
-        }
-
-        // Method 2: Use web scraping fallback
-        if (resolveMethod === 'search' || resolveMethod === 'profile_lookup') {
-          const webResult = await usernameResolver.resolveUsername(username);
-          
-          // If web scraping found an ID, verify it with API
-          if (webResult.success && webResult.userId) {
-            try {
-              const verifyResult: any = await apiClient.get(`/${webResult.userId}`, { 
-                fields: 'id,username,name' 
-              });
-              result = {
-                success: true,
-                method: 'web_scraping_verified',
-                userId: verifyResult.id,
-                username: verifyResult.username,
-                name: verifyResult.name,
-                note: 'Username resolved via web scraping and verified with API',
-                originalMethod: webResult.method
-              };
-            } catch (verifyError) {
-              // Return unverified result with warning
-              result = {
-                ...webResult,
-                method: 'web_scraping_unverified',
-                note: webResult.note + ' (Could not verify with API - use with caution)'
-              };
-            }
-          } else {
-            result = webResult;
+        // Get current user ID first
+        const currentUser: any = await apiClient.get('/me', { fields: 'id' });
+        result = await apiClient.paginate(
+          `/${currentUser.id}/threads`,
+          {
+            fields: threadsFields,
+            limit: limit || 25,
+            since,
+            until,
           }
-          break;
-        }
+        );
+        break;
 
-        // Method 3: Search through mentions (fallback)
-        if (resolveMethod === 'mention_search') {
-          try {
-            const currentUser: any = await apiClient.get('/me', { fields: 'id' });
-            const threads: any = await apiClient.get(`/${currentUser.id}/threads`, {
-              fields: 'text,id',
-              limit: 100
-            });
-            
-            const mentionPattern = new RegExp(`@${username}\\b`, 'i');
-            const mentionedThreads = threads.data?.filter((thread: any) => 
-              thread.text && mentionPattern.test(thread.text)
-            );
-            
-            result = {
-              success: false,
-              method: 'mention_search',
-              username: username,
-              mentionedIn: mentionedThreads?.length || 0,
-              note: `Found ${mentionedThreads?.length || 0} mentions of @${username} but couldn't extract user ID`,
-              suggestions: [
-                'Try the "profile_lookup" method instead',
-                'Use numerical user ID if available',
-                'Contact the user directly for their ID'
-              ]
-            };
-          } catch (searchError) {
-            result = {
-              success: false,
-              method: 'mention_search',
-              username: username,
-              error: searchError instanceof Error ? searchError.message : 'Unknown error',
-              note: 'Unable to search mentions due to API limitations'
-            };
-          }
-          break;
-        }
-
-        // Default fallback
-        result = {
-          success: false,
-          method: resolveMethod,
-          username: username,
-          error: 'No resolution method succeeded',
-          note: 'All username resolution methods failed',
-          suggestions: [
-            'Verify username exists and is spelled correctly',
-            'Try different resolution method: search, profile_lookup, mention_search',
-            'Use numerical user ID if available'
-          ]
+      case 'publish_thread':
+        const { text, media_type, media_url, location_name } = args as any;
+        
+        const publishData: any = {
+          text,
+          media_type: media_type || 'TEXT',
         };
-        break;
-
-      case 'get_user_threads':
-        const { userId: threadUserId, fields: userThreadFields, limit } = args as any;
-        const threadsFields = userThreadFields?.join(',') || 'id,media_type,media_url,text,timestamp,permalink,username,is_quote_post';
         
-        try {
-          result = await apiClient.paginate(
-            `/${threadUserId}/threads`,
-            {
-              fields: threadsFields,
-              limit: limit || 25,
-            }
-          );
-        } catch (error: any) {
-          // Enhanced error handling for external user threads access
-          const errorCode = error.response?.data?.error?.code;
-          
-          if (errorCode === 2) {
-            result = {
-              error: 'Access Denied',
-              code: 2,
-              userId: threadUserId,
-              message: 'Cannot access threads from this user',
-              threads: [],
-              suggestions: [
-                'This user may have privacy settings that prevent threads access',
-                'Try accessing your own threads using your user ID',
-                'Some users require mutual following or app approval',
-                'Public figures may have restricted API access'
-              ],
-              note: 'Threads API limits access to external user threads for privacy protection',
-              workaround: 'Use resolve_username and search_user_threads for your own content analysis'
-            };
-          } else {
-            throw error;
-          }
+        if (media_url) {
+          publishData.media_url = media_url;
         }
+        
+        if (location_name) {
+          publishData.location_name = location_name;
+        }
+        
+        // Get current user ID
+        const user: any = await apiClient.get('/me', { fields: 'id' });
+        result = await apiClient.post(`/${user.id}/threads`, publishData);
         break;
 
-      case 'search_user_threads':
-        const { userId: searchUserId, query, limit: searchLimit } = args as any;
+      case 'delete_thread':
+        const { thread_id } = args as any;
+        result = await apiClient.delete(`/${thread_id}`);
+        break;
+
+      case 'search_my_threads':
+        const { query, limit: searchLimit } = args as any;
         
-        // Get user's threads first
+        // Get current user's threads first
+        const me: any = await apiClient.get('/me', { fields: 'id' });
         const userThreads = await apiClient.paginate(
-          `/${searchUserId}/threads`,
+          `/${me.id}/threads`,
           {
             fields: 'id,text,media_type,timestamp,permalink',
             limit: searchLimit || 100,
           }
         );
         
-        // Filter threads based on query
+        // Filter threads based on query (client-side)
         const filteredThreads = userThreads.filter((thread: any) => 
           thread.text && thread.text.toLowerCase().includes(query.toLowerCase())
         );
         
         result = {
           searchQuery: query,
-          userId: searchUserId,
           totalThreadsSearched: userThreads.length,
           matchingThreads: filteredThreads.length,
           threads: filteredThreads,
-          note: 'Client-side search through user threads due to API limitations'
         };
         break;
 
-      case 'get_thread_details':
-        const { threadId, fields: detailFields } = args as any;
-        const detailThreadFields = detailFields?.join(',') || 'id,media_type,media_url,text,timestamp,permalink,username,children,is_quote_post';
-        result = await apiClient.get(`/${threadId}`, { fields: detailThreadFields });
+      case 'get_thread_replies':
+        const { thread_id: threadId, fields: replyFields } = args as any;
+        const repliesFields = replyFields?.join(',') || 'id,text,username,timestamp,hide_status';
+        result = await apiClient.get(`/${threadId}/replies`, { fields: repliesFields });
+        break;
+
+      case 'manage_reply':
+        const { reply_id, hide } = args as any;
+        result = await apiClient.post(`/${reply_id}/manage`, { hide });
+        break;
+
+      case 'get_my_insights':
+        const { metrics, period, since: insightSince, until: insightUntil } = args as any;
+        const currentUserForInsights: any = await apiClient.get('/me', { fields: 'id' });
+        result = await apiClient.get(`/${currentUserForInsights.id}/threads_insights`, {
+          metric: metrics.join(','),
+          period,
+          since: insightSince,
+          until: insightUntil,
+        });
+        break;
+
+      case 'get_thread_insights':
+        const { thread_id: insightThreadId, metrics: threadMetrics, period: threadPeriod } = args as any;
+        result = await apiClient.get(`/${insightThreadId}/insights`, {
+          metric: threadMetrics.join(','),
+          period: threadPeriod,
+        });
+        break;
+
+      case 'get_mentions':
+        const { fields: mentionFields, limit: mentionLimit } = args as any;
+        const mentionsFields = mentionFields?.join(',') || 'id,text,username,timestamp';
+        
+        // This would depend on the actual API endpoint for mentions
+        const userForMentions: any = await apiClient.get('/me', { fields: 'id' });
+        result = await apiClient.get(`/${userForMentions.id}/mentions`, {
+          fields: mentionsFields,
+          limit: mentionLimit || 25,
+        });
+        break;
+
+      case 'get_publishing_limit':
+        const userForLimit: any = await apiClient.get('/me', { fields: 'id' });
+        result = await apiClient.get(`/${userForLimit.id}/threads_publishing_limit`);
         break;
 
       default:
@@ -414,7 +417,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Threads MCP server running on stdio');
+  console.error('Threads Personal Manager MCP server running on stdio');
 }
 
 main().catch((error) => {

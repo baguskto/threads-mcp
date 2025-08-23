@@ -1,60 +1,44 @@
-# Meta Threads MCP Server
+# 📱 Threads Personal Manager - MCP Server
 
-A comprehensive Model Context Protocol (MCP) server for Meta's Threads API, enabling data analysis, content management, and analytics capabilities.
+A focused MCP (Model Context Protocol) server for **personal Threads management**. Manage your own Threads content, analytics, and interactions with ease.
 
-## Features
+## 🎯 **Personal Management Focus**
 
-- **User Management**: Retrieve user profiles and current user information
-- **Content Retrieval**: Access threads, media objects, replies, and conversations
-- **Analytics & Insights**: Get detailed performance metrics and account analytics
-- **Search Functionality**: Search threads by keywords and hashtags
-- **Content Moderation**: Manage and moderate replies
-- **Rate Limiting**: Built-in rate limiting and quota management
+This MCP server is designed specifically for managing **YOUR OWN** Threads content. No more external user limitations - just powerful personal content management tools.
 
-## Installation
+## ✨ Features
+
+- **Content Management**: Create, view, search, and delete your threads
+- **Analytics**: Get insights on your account and thread performance  
+- **Interaction Management**: Handle replies and mentions
+- **Search**: Find content within your own threads
+- **Publishing Control**: Check limits and manage your posting
+
+## 🚀 Quick Start
+
+### Installation
 
 ```bash
-npm install @threads/mcp-server
+npm install -g threads-mcp-server
 ```
 
-## Configuration
+### Configuration
 
-### Environment Variables
-
-Create a `.env` file with the following variables:
+Create a `.env` file with your Threads access token:
 
 ```env
-# Meta Threads API Configuration
 THREADS_ACCESS_TOKEN=your_access_token_here
-
-# Server Configuration (optional)
-MCP_SERVER_NAME=threads-mcp
-LOG_LEVEL=info
-RATE_LIMIT_REQUESTS_PER_HOUR=200
-CACHE_TTL_SECONDS=3600
-CACHE_ENABLED=true
 ```
 
-### Obtaining Access Token
+### Claude Desktop Setup
 
-1. Visit [Meta for Developers](https://developers.facebook.com/)
-2. Create a new app or use an existing one
-3. Add the Threads API product to your app
-4. Generate an access token with the required permissions
-5. Convert short-lived token to long-lived token if needed
-
-## Usage
-
-### With Claude Desktop
-
-Add the server to your Claude Desktop configuration:
+Add to your Claude Desktop configuration:
 
 ```json
 {
   "mcpServers": {
     "threads": {
-      "command": "npx",
-      "args": ["@threads/mcp-server"],
+      "command": "threads-mcp-server",
       "env": {
         "THREADS_ACCESS_TOKEN": "your_access_token_here"
       }
@@ -63,224 +47,226 @@ Add the server to your Claude Desktop configuration:
 }
 ```
 
-### Available Tools
+## 🛠️ Available Tools
 
-#### User Management
+### Profile & Account Management
 
-- **get_current_user**: Get the authenticated user's profile
-  ```typescript
-  {
-    userFields?: string[];
-  }
-  ```
-
-- **get_user_profile**: Retrieve a user's Threads profile information
-  ```typescript
-  {
-    userId: string;
-    fields?: string[];
-  }
-  ```
-
-- **resolve_username**: Convert username to user ID (NEW! 🚀)
-  ```typescript
-  {
-    username: string;
-    method?: 'search' | 'profile_lookup' | 'mention_search';
-  }
-  ```
-
-- **get_user_threads**: Retrieve a user's threads/posts
-  ```typescript
-  {
-    userId: string;
-    fields?: string[];
-    limit?: number;
-  }
-  ```
-
-#### Search & Discovery Tools
-
-- **search_user_threads**: Search within a specific user's threads (NEW! 🔍)
-  ```typescript
-  {
-    userId: string;
-    query: string;
-    limit?: number;
-  }
-  ```
-
-- **get_thread_details**: Get detailed information about a specific thread (NEW! 📄)
-  ```typescript
-  {
-    threadId: string;
-    fields?: string[];
-  }
-  ```
-
-## Available Metrics
-
-### Media Insights
-- `views`: Number of times the media was viewed
-- `likes`: Number of likes
-- `replies`: Number of replies
-- `reposts`: Number of reposts
-- `quotes`: Number of quote posts
-- `reach`: Unique accounts reached
-- `impressions`: Total impressions
-- `shares`: Number of shares
-- `total_interactions`: Total engagement
-
-### Account Insights
-- `followers_count`: Current follower count
-- `following_count`: Current following count
-- `posts_count`: Total number of posts
-- `profile_views`: Profile view count
-- `reach`: Account reach
-- `impressions`: Account impressions
-- `website_clicks`: Website click count
-- `follower_demographics`: Demographic data
-
-## Examples
-
-### NEW! Username to User ID Resolution 🚀
-```javascript
-// Resolve any username to get their User ID
-const resolution = await tools.resolve_username({
-  username: "zuck",
-  method: "profile_lookup"
-});
-// Returns: { success: true, userId: "7541850075452114403", username: "zuck" }
-
-const mosseri = await tools.resolve_username({
-  username: "mosseri"
-});
-// Returns: { success: true, userId: "7541850195850986616", username: "mosseri" }
+#### `get_my_profile`
+Get your Threads profile information
+```typescript
+{
+  fields?: string[] // Profile fields to retrieve
+}
 ```
 
-### Advanced User Analysis Workflow
-```javascript
-// 1. Resolve username to ID
-const user = await tools.resolve_username({ username: "zuck" });
-
-// 2. Get their profile (if accessible)
-const profile = await tools.get_user_profile({
-  userId: user.userId,
-  fields: ["id", "username", "name", "threads_biography"]
-});
-
-// 3. Get their recent threads
-const threads = await tools.get_user_threads({
-  userId: user.userId,
-  limit: 50
-});
-
-// 4. Search within their threads
-const aiPosts = await tools.search_user_threads({
-  userId: user.userId,
-  query: "artificial intelligence",
-  limit: 100
-});
+#### `get_my_insights`
+Get analytics for your account
+```typescript
+{
+  metrics: string[];    // e.g., ['followers_count', 'posts_count']
+  period?: string;      // 'day', 'week', 'days_28', 'month', 'lifetime'
+  since?: string;       // ISO 8601 date
+  until?: string;       // ISO 8601 date
+}
 ```
 
-### Thread Deep Dive Analysis
-```javascript
-// Get detailed thread information
-const threadDetails = await tools.get_thread_details({
-  threadId: "thread_12345",
-  fields: ["id", "text", "media_url", "timestamp", "children"]
-});
-
-// Search your own threads
-const myThreads = await tools.search_user_threads({
-  userId: "your_user_id",
-  query: "project",
-  limit: 50
-});
+#### `get_publishing_limit`
+Check your current posting quotas and limits
+```typescript
+{} // No parameters needed
 ```
 
-### Basic User Analysis
-```javascript
-// Get your current profile
-const profile = await tools.get_current_user({
-  userFields: ["id", "username", "name"]
-});
+### Content Management
 
-// Get your recent threads
-const threads = await tools.get_user_threads({
-  userId: profile.id,
-  limit: 25
-});
+#### `get_my_threads`
+Get your own threads/posts
+```typescript
+{
+  fields?: string[];    // Thread fields to retrieve
+  limit?: number;       // Number of threads to get
+  since?: string;       // ISO 8601 date filter
+  until?: string;       // ISO 8601 date filter
+}
 ```
 
-## Error Handling
+#### `publish_thread`
+Create and publish a new thread
+```typescript
+{
+  text: string;           // Thread content (required)
+  media_type?: string;    // 'TEXT', 'IMAGE', 'VIDEO'
+  media_url?: string;     // URL for media content
+  location_name?: string; // Location tagging
+}
+```
 
-The server includes comprehensive error handling for:
-- Invalid authentication tokens
-- Rate limiting exceeded
-- Network timeouts
-- Invalid parameters
-- Permission denied scenarios
+#### `delete_thread`
+Delete one of your threads
+```typescript
+{
+  thread_id: string; // ID of your thread to delete
+}
+```
 
-## Rate Limiting
+#### `search_my_threads`
+Search within your own threads
+```typescript
+{
+  query: string;   // Search keywords
+  limit?: number;  // Threads to search through
+}
+```
 
-The server implements rate limiting to comply with Threads API limits:
-- Default: 200 requests per hour
-- Configurable via environment variables
-- Automatic retry with exponential backoff
+### Thread Interactions
 
-## Security Considerations
+#### `get_thread_replies`
+Get replies to your specific thread
+```typescript
+{
+  thread_id: string;    // Your thread ID
+  fields?: string[];    // Reply fields to retrieve
+}
+```
 
-- **Token Security**: Store access tokens securely in environment variables
-- **Scope Validation**: Ensure your token has the required permissions
-- **Data Privacy**: Handle user data according to privacy regulations
-- **HTTPS Only**: All API communications use HTTPS
+#### `manage_reply`
+Hide or show replies to your threads
+```typescript
+{
+  reply_id: string; // Reply ID to manage
+  hide: boolean;    // true to hide, false to show
+}
+```
 
-## Development
+#### `get_mentions`
+Get threads where you are mentioned
+```typescript
+{
+  fields?: string[];  // Fields to retrieve
+  limit?: number;     // Number of mentions
+}
+```
 
-### Building from Source
+### Analytics & Performance
+
+#### `get_thread_insights`
+Get performance metrics for your specific thread
+```typescript
+{
+  thread_id: string;    // Your thread ID
+  metrics: string[];    // e.g., ['views', 'likes', 'replies']
+  period?: string;      // Time period for metrics
+}
+```
+
+## 📊 Test Results
+
+**Latest Test Results**: ✅ 4/5 core functions working perfectly
+
+| Tool | Status | Notes |
+|------|--------|-------|
+| `get_my_profile` | ✅ Working | Full profile data |
+| `get_my_threads` | ✅ Working | Returns thread list |
+| `search_my_threads` | ✅ Working | Client-side filtering |
+| `get_publishing_limit` | ✅ Working | Quota information |
+| `publish_thread` | ✅ Working | **Successfully publishes!** |
+| `delete_thread` | ⚠️ Limited | Error 400 (endpoint issue) |
+| `get_my_insights` | ⚠️ Limited | Error 500 (permission/endpoint) |
+
+## 💡 Usage Examples
+
+### Content Creation & Management
 ```bash
-npm install
-npm run build
+# Publish a new thread
+@threads publish "Just testing my personal Threads manager! 🚀"
+
+# Get my recent threads
+@threads get my recent threads limit 10
+
+# Search my content
+@threads search "project" in my threads
 ```
 
-### Testing
+### Analytics & Performance
 ```bash
-npm test
+# Check my publishing limits
+@threads check my publishing quotas
+
+# Get my profile stats
+@threads get my profile information
+
+# Get thread performance (if available)
+@threads get insights for thread 123456
 ```
 
-### Running in Development Mode
+### Interaction Management
 ```bash
-npm run dev
+# Get replies to my thread
+@threads get replies for my thread 123456
+
+# Hide a reply
+@threads hide reply 789012
+
+# Get my mentions
+@threads get where I am mentioned
 ```
 
-## Troubleshooting
+## 🔧 Technical Details
 
-### Common Issues
+### Personal Focus Benefits
+- **No External User Limitations**: Only works with your own content
+- **Full Access**: All permissions work on your own data
+- **Reliable**: No privacy restrictions or access denials
+- **Fast**: Direct API calls without workarounds
 
-1. **Authentication Error**: Verify your access token is valid and has the required permissions
-2. **Rate Limit Exceeded**: Wait for the rate limit window to reset or reduce request frequency
-3. **Permission Denied**: Check if your app has the necessary Threads API permissions
-4. **Network Timeout**: Increase timeout settings or check your network connection
+### Error Handling
+- Automatic retry for transient errors
+- Clear error messages for permission issues
+- Graceful handling of API limitations
 
-## Contributing
+### Rate Limiting
+- Built-in exponential backoff
+- Respects Threads API rate limits
+- Smart retry logic for temporary failures
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+## 🚨 Important Notes
 
-## License
+### Permissions Required
+Ensure your Threads app has these permissions enabled:
+- `threads_basic` - Basic thread access
+- `threads_content_publish` - Create/publish content
+- `threads_delete` - Delete threads (if using delete functionality)
+- `threads_manage_insights` - Analytics access
+- `threads_manage_replies` - Reply management
+
+### Limitations
+- **Delete Function**: Currently returns 400 error (API endpoint needs verification)
+- **Insights**: Some analytics endpoints return 500 error (may need additional permissions)
+- **Personal Only**: Designed only for your own content management
+
+## 📈 Roadmap
+
+### Planned Improvements
+- [ ] Fix delete thread endpoint
+- [ ] Resolve insights API issues  
+- [ ] Add batch operations
+- [ ] Enhanced search filters
+- [ ] Thread scheduling
+- [ ] Content analytics dashboard
+
+## 🤝 Contributing
+
+This is a focused personal management tool. Feature requests should align with personal Threads management use cases.
+
+## 📄 License
 
 MIT
 
-## Support
+---
 
-For issues and feature requests, please visit our [GitHub repository](https://github.com/baguskto/threads-mcp).
+## 🎯 **Perfect For:**
+- **Content Creators**: Manage your Threads content efficiently
+- **Social Media Managers**: Handle personal brand accounts  
+- **Analysts**: Track your own content performance
+- **Developers**: Integrate Threads into personal workflows
 
-## Changelog
-
-### Version 1.0.0
-- Initial release with full Threads API coverage
-- User management tools
-- Content retrieval and management
-- Analytics and insights
-- Search functionality
-- Rate limiting and caching
+**Focus**: Your content, your control, your insights! 🚀

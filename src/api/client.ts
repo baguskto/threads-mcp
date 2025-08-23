@@ -68,9 +68,27 @@ export class ThreadsAPIClient {
     return response.data;
   }
 
-  async delete<T>(endpoint: string): Promise<T> {
-    const response = await this.client.delete<T>(endpoint);
-    return response.data;
+  async delete<T>(endpoint: string, retries = 3): Promise<T> {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const response = await this.client.delete<T>(endpoint);
+        return response.data;
+      } catch (error: any) {
+        const apiError = error.response?.data?.error;
+        const isTransientError = apiError?.is_transient === true;
+        const isCode2Error = apiError?.code === 2;
+        const isLastAttempt = attempt === retries;
+        
+        if ((isTransientError || isCode2Error) && !isLastAttempt) {
+          console.error(`Delete attempt ${attempt} failed with error code ${apiError?.code}, retrying in ${attempt * 1000}ms...`);
+          await this.sleep(attempt * 1000);
+          continue;
+        }
+        
+        throw error;
+      }
+    }
+    throw new Error('Max retries exceeded');
   }
 
   async paginate<T>(
