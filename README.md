@@ -147,6 +147,32 @@ Get threads where you are mentioned
 }
 ```
 
+#### `create_reply`
+Reply to a specific thread or post
+```typescript
+{
+  reply_to_id: string;     // Thread/post ID to reply to (required)
+  text: string;            // Reply content (required)
+  media_type?: string;     // 'TEXT', 'IMAGE', 'VIDEO'
+  media_url?: string;      // Media URL for IMAGE/VIDEO
+  reply_control?: string;  // 'everyone', 'accounts_you_follow', etc.
+}
+```
+*Note: Uses two-step process like publish_thread. Creates real replies that appear in thread conversations.*
+
+#### `create_thread_chain`
+Create connected reply chains for threaded conversations
+```typescript
+{
+  parent_thread_id: string;  // Starting thread ID (required)
+  replies: Array<{           // Array of replies (required)
+    text: string;            // Reply text
+    reply_control?: string;  // Who can reply to this reply
+  }>;
+}
+```
+*Note: Creates true threaded conversations where each reply responds to the previous one, enabling Twitter-like thread chains.*
+
 ### Analytics & Performance
 
 #### `get_thread_insights`
@@ -161,7 +187,7 @@ Get performance metrics for your specific thread
 
 ## 📊 Test Results
 
-**Latest Test Results**: ✅ 4/5 core functions working perfectly
+**Latest Test Results**: ✅ 6/7 core functions + 2 NEW reply features working perfectly
 
 | Tool | Status | Notes |
 |------|--------|-------|
@@ -172,6 +198,8 @@ Get performance metrics for your specific thread
 | `publish_thread` | ✅ Working | **Successfully publishes!** |
 | `delete_thread` | ⚠️ Limited | Error 400 (endpoint issue) |
 | `get_my_insights` | ⚠️ Limited | Error 500 (permission/endpoint) |
+| `create_reply` | ✅ **NEW** | **Creates real replies!** |
+| `create_thread_chain` | ✅ **NEW** | **True threaded conversations!** |
 
 ## 💡 Usage Examples
 
@@ -185,6 +213,21 @@ Get performance metrics for your specific thread
 
 # Search my content
 @threads search "project" in my threads
+```
+
+### Reply & Thread Management
+```bash
+# Reply to a specific thread
+@threads reply to thread 123456 "Great post! Thanks for sharing"
+
+# Create a thread chain (multiple connected replies)
+@threads create chain from thread 123456 with replies:
+- "First point in my response 🧵"  
+- "Second point continuing the thought"
+- "Final point wrapping up"
+
+# Get replies to my thread
+@threads get replies to my thread 123456
 ```
 
 ### Analytics & Performance

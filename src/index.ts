@@ -251,6 +251,64 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {},
         },
       },
+      {
+        name: 'create_reply',
+        description: 'Reply to a specific thread/post',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            reply_to_id: {
+              type: 'string',
+              description: 'ID of the thread/post to reply to',
+            },
+            text: {
+              type: 'string',
+              description: 'Reply text content',
+            },
+            media_type: {
+              type: 'string',
+              enum: ['TEXT', 'IMAGE', 'VIDEO'],
+              description: 'Type of media (default: TEXT)',
+            },
+            media_url: {
+              type: 'string',
+              description: 'URL of media to include (for IMAGE/VIDEO)',
+            },
+            reply_control: {
+              type: 'string',
+              enum: ['everyone', 'accounts_you_follow', 'mentioned_only', 'parent_post_author_only', 'followers_only'],
+              description: 'Who can reply to this reply',
+            },
+          },
+          required: ['reply_to_id', 'text'],
+        },
+      },
+      {
+        name: 'create_thread_chain',
+        description: 'Create a thread chain (multiple connected replies)',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            parent_thread_id: {
+              type: 'string',
+              description: 'ID of the parent thread to start the chain',
+            },
+            replies: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  text: { type: 'string' },
+                  reply_control: { type: 'string', enum: ['everyone', 'accounts_you_follow', 'mentioned_only', 'parent_post_author_only', 'followers_only'] }
+                },
+                required: ['text']
+              },
+              description: 'Array of reply texts to create as a chain',
+            },
+          },
+          required: ['parent_thread_id', 'replies'],
+        },
+      },
     ],
   };
 });
@@ -404,6 +462,109 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'get_publishing_limit':
         const userForLimit: any = await apiClient.get('/me', { fields: 'id' });
         result = await apiClient.get(`/${userForLimit.id}/threads_publishing_limit`);
+        break;
+
+      case 'create_reply':
+        const { reply_to_id, text: replyText, media_type: replyMediaType, media_url: replyMediaUrl, reply_control } = args as any;
+        
+        const replyData: any = {
+          text: replyText,
+          media_type: replyMediaType || 'TEXT',
+          reply_to_id: reply_to_id,
+        };
+        
+        if (replyMediaUrl) {
+          replyData.media_url = replyMediaUrl;
+        }
+        
+        if (reply_control) {
+          replyData.reply_control = reply_control;
+        }
+        
+        // Get current user ID
+        const userForReply: any = await apiClient.get('/me', { fields: 'id' });
+        
+        // Step 1: Create reply container
+        const replyContainerResponse: any = await apiClient.post(`/${userForReply.id}/threads`, replyData);
+        
+        if (!replyContainerResponse.id) {
+          throw new Error('Failed to create reply container');
+        }
+        
+        // Step 2: Publish the reply
+        const publishedReply: any = await apiClient.post(`/${userForReply.id}/threads_publish`, {
+          creation_id: replyContainerResponse.id
+        });
+        
+        // Return combined result
+        result = {
+          ...publishedReply,
+          container_id: replyContainerResponse.id,
+          reply_to_id: reply_to_id,
+          reply_data: replyData
+        };
+        break;
+
+      case 'create_thread_chain':
+        const { parent_thread_id, replies } = args as any;
+        
+        const chainResults = [];
+        let currentReplyToId = parent_thread_id;
+        
+        const userForChain: any = await apiClient.get('/me', { fields: 'id' });
+        
+        for (let i = 0; i < replies.length; i++) {
+          const replyItem = replies[i];
+          
+          const chainReplyData: any = {
+            text: replyItem.text,
+            media_type: 'TEXT',
+            reply_to_id: currentReplyToId,
+          };
+          
+          if (replyItem.reply_control) {
+            chainReplyData.reply_control = replyItem.reply_control;
+          }
+          
+          // Step 1: Create container
+          const chainContainerResponse: any = await apiClient.post(`/${userForChain.id}/threads`, chainReplyData);
+          
+          if (!chainContainerResponse.id) {
+            throw new Error(`Failed to create container for reply ${i + 1}`);
+          }
+          
+          // Step 2: Publish
+          const chainPublishedReply: any = await apiClient.post(`/${userForChain.id}/threads_publish`, {
+            creation_id: chainContainerResponse.id
+          });
+          
+          const chainResult = {
+            ...chainPublishedReply,
+            container_id: chainContainerResponse.id,
+            reply_to_id: currentReplyToId,
+            chain_position: i + 1,
+            reply_data: chainReplyData
+          };
+          
+          chainResults.push(chainResult);
+          
+          // Next reply will reply to this one for true threading
+          if (chainPublishedReply.id) {
+            currentReplyToId = chainPublishedReply.id;
+          }
+          
+          // Small delay between chain posts to avoid rate limits
+          if (i < replies.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        }
+        
+        result = {
+          parent_thread_id,
+          chain_length: replies.length,
+          replies: chainResults,
+          success: chainResults.length === replies.length
+        };
         break;
 
       default:
