@@ -26,16 +26,17 @@ export class ThreadsAPIClient {
       return config;
     });
 
-    this.client.interceptors.response.use(
-      (response) => response,
-      (error: AxiosError<ThreadsAPIError>) => {
-        if (error.response?.data?.error) {
-          const apiError = error.response.data.error;
-          throw new Error(`Threads API Error: ${apiError.message} (Code: ${apiError.code})`);
-        }
-        throw error;
-      }
-    );
+    // Remove the response interceptor to handle errors in get method
+    // this.client.interceptors.response.use(
+    //   (response) => response,
+    //   (error: AxiosError<ThreadsAPIError>) => {
+    //     if (error.response?.data?.error) {
+    //       const apiError = error.response.data.error;
+    //       throw new Error(`Threads API Error: ${apiError.message} (Code: ${apiError.code})`);
+    //     }
+    //     throw error;
+    //   }
+    // );
   }
 
   async get<T>(endpoint: string, params?: Record<string, any>, retries = 3): Promise<T> {
@@ -44,16 +45,18 @@ export class ThreadsAPIClient {
         const response = await this.client.get<T>(endpoint, { params });
         return response.data;
       } catch (error: any) {
-        const isTransientError = error.response?.data?.error?.is_transient === true;
-        const isCode2Error = error.response?.data?.error?.code === 2;
+        const apiError = error.response?.data?.error;
+        const isTransientError = apiError?.is_transient === true;
+        const isCode2Error = apiError?.code === 2;
         const isLastAttempt = attempt === retries;
         
         if ((isTransientError || isCode2Error) && !isLastAttempt) {
-          console.error(`Attempt ${attempt} failed with transient error, retrying in ${attempt * 1000}ms...`);
-          await this.sleep(attempt * 1000); // Exponential backoff
+          console.error(`Attempt ${attempt} failed with error code ${apiError?.code}, retrying in ${attempt * 1000}ms...`);
+          await this.sleep(attempt * 1000);
           continue;
         }
         
+        // Re-throw the original axios error so the calling code can handle it
         throw error;
       }
     }
