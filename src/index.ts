@@ -8,15 +8,187 @@ import {
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { ThreadsAPIClient } from './api/client.js';
-import { userTools } from './tools/user.js';
-import { contentTools } from './tools/content.js';
-import { analyticsTools } from './tools/analytics.js';
-import { searchTools } from './tools/search.js';
 import dotenv from 'dotenv';
+import { ThreadsAPIClient } from './api/client.js';
 
 dotenv.config();
 
+// Tool definitions
+const tools: Tool[] = [
+  {
+    name: 'get_user_profile',
+    description: 'Retrieve a user\'s Threads profile information',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        userId: {
+          type: 'string',
+          description: 'The ID of the user',
+        },
+        fields: {
+          type: 'array',
+          items: {
+            type: 'string',
+          },
+          description: 'Fields to retrieve (defaults to all)',
+        },
+      },
+      required: ['userId'],
+    },
+  },
+  {
+    name: 'get_current_user',
+    description: 'Get the authenticated user\'s profile',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        userFields: {
+          type: 'array',
+          items: {
+            type: 'string',
+          },
+          description: 'Fields to retrieve (defaults to all)',
+        },
+      },
+    },
+  },
+  {
+    name: 'get_user_threads',
+    description: 'Retrieve a user\'s threads/posts',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        userId: {
+          type: 'string',
+          description: 'The ID of the user',
+        },
+        fields: {
+          type: 'array',
+          items: {
+            type: 'string',
+          },
+          description: 'Fields to retrieve',
+        },
+        since: {
+          type: 'string',
+          description: 'ISO 8601 date string for filtering threads',
+        },
+        until: {
+          type: 'string',
+          description: 'ISO 8601 date string for filtering threads',
+        },
+        limit: {
+          type: 'number',
+          description: 'Number of threads to retrieve per page',
+        },
+      },
+      required: ['userId'],
+    },
+  },
+  {
+    name: 'get_media_object',
+    description: 'Get details of a specific thread/media object',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mediaId: {
+          type: 'string',
+          description: 'The ID of the media object',
+        },
+        mediaFields: {
+          type: 'array',
+          items: {
+            type: 'string',
+          },
+          description: 'Fields to retrieve',
+        },
+      },
+      required: ['mediaId'],
+    },
+  },
+  {
+    name: 'get_replies',
+    description: 'Retrieve replies to a specific thread',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mediaId: {
+          type: 'string',
+          description: 'The ID of the media/thread',
+        },
+        fields: {
+          type: 'array',
+          items: {
+            type: 'string',
+          },
+          description: 'Fields to retrieve',
+        },
+        reverse: {
+          type: 'boolean',
+          description: 'Reverse the order of replies',
+        },
+        since: {
+          type: 'string',
+          description: 'ISO 8601 date string for filtering',
+        },
+        until: {
+          type: 'string',
+          description: 'ISO 8601 date string for filtering',
+        },
+      },
+      required: ['mediaId'],
+    },
+  },
+  {
+    name: 'get_media_insights',
+    description: 'Retrieve performance metrics for specific posts',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mediaId: {
+          type: 'string',
+          description: 'The ID of the media/thread',
+        },
+        metrics: {
+          type: 'array',
+          items: {
+            type: 'string',
+          },
+          description: 'Metrics to retrieve',
+        },
+        period: {
+          type: 'string',
+          description: 'Time period for the metrics',
+        },
+      },
+      required: ['mediaId', 'metrics'],
+    },
+  },
+  {
+    name: 'search_threads',
+    description: 'Search for threads by keyword or hashtag',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search query (keywords or hashtags)',
+        },
+        type: {
+          type: 'string',
+          description: 'Type of search results (top or recent)',
+        },
+        count: {
+          type: 'number',
+          description: 'Number of results to return',
+        },
+      },
+      required: ['query'],
+    },
+  },
+];
+
+// Create server instance
 const server = new Server(
   {
     name: 'threads-mcp',
@@ -40,19 +212,14 @@ const initializeClient = () => {
   return apiClient;
 };
 
-const allTools: Tool[] = [
-  ...userTools,
-  ...contentTools,
-  ...analyticsTools,
-  ...searchTools,
-];
-
+// Handle list tools request
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
-    tools: allTools,
+    tools: tools,
   };
 });
 
+// Handle tool calls
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (!apiClient) {
     apiClient = initializeClient();
@@ -65,33 +232,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     switch (name) {
       case 'get_user_profile':
-        const { userId, fields } = z.object({
-          userId: z.string(),
-          fields: z.array(z.string()).optional(),
-        }).parse(args);
-        
+        const { userId, fields } = args as any;
         const fieldsParam = fields?.join(',') || 'id,username,name,threads_profile_picture_url,threads_biography';
         result = await apiClient.get(`/${userId}`, { fields: fieldsParam });
         break;
 
       case 'get_current_user':
-        const { userFields } = z.object({
-          userFields: z.array(z.string()).optional(),
-        }).parse(args);
-        
+        const { userFields } = args as any;
         const userFieldsParam = userFields?.join(',') || 'id,username,name';
         result = await apiClient.get('/me', { fields: userFieldsParam });
         break;
 
       case 'get_user_threads':
-        const threadsParams = z.object({
-          userId: z.string(),
-          fields: z.array(z.string()).optional(),
-          since: z.string().optional(),
-          until: z.string().optional(),
-          limit: z.number().optional(),
-        }).parse(args);
-        
+        const threadsParams = args as any;
         const threadsFields = threadsParams.fields?.join(',') || 'id,media_type,media_url,text,timestamp,permalink,username,is_quote_post';
         result = await apiClient.paginate(
           `/${threadsParams.userId}/threads`,
@@ -105,24 +258,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
 
       case 'get_media_object':
-        const { mediaId, mediaFields } = z.object({
-          mediaId: z.string(),
-          mediaFields: z.array(z.string()).optional(),
-        }).parse(args);
-        
-        const mediaFieldsParam = mediaFields?.join(',') || 'id,media_type,media_url,text,timestamp,permalink,username,children,is_quote_post';
-        result = await apiClient.get(`/${mediaId}`, { fields: mediaFieldsParam });
+        const mediaParams = args as any;
+        const mediaFieldsParam = mediaParams.mediaFields?.join(',') || 'id,media_type,media_url,text,timestamp,permalink,username,children,is_quote_post';
+        result = await apiClient.get(`/${mediaParams.mediaId}`, { fields: mediaFieldsParam });
         break;
 
       case 'get_replies':
-        const repliesParams = z.object({
-          mediaId: z.string(),
-          fields: z.array(z.string()).optional(),
-          reverse: z.boolean().optional(),
-          since: z.string().optional(),
-          until: z.string().optional(),
-        }).parse(args);
-        
+        const repliesParams = args as any;
         const repliesFields = repliesParams.fields?.join(',') || 'id,text,username,timestamp,media_type,media_url,hide_status';
         result = await apiClient.get(`/${repliesParams.mediaId}/replies`, {
           fields: repliesFields,
@@ -132,89 +274,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         });
         break;
 
-      case 'get_conversation':
-        const convParams = z.object({
-          conversationId: z.string(),
-          fields: z.array(z.string()).optional(),
-          reverse: z.boolean().optional(),
-        }).parse(args);
-        
-        const convFields = convParams.fields?.join(',') || 'id,text,username,timestamp,media_type';
-        result = await apiClient.get(`/${convParams.conversationId}/conversation`, {
-          fields: convFields,
-          reverse: convParams.reverse,
-        });
-        break;
-
       case 'get_media_insights':
-        const insightsParams = z.object({
-          mediaId: z.string(),
-          metrics: z.array(z.string()),
-          period: z.string().optional(),
-          since: z.string().optional(),
-          until: z.string().optional(),
-        }).parse(args);
-        
+        const insightsParams = args as any;
         result = await apiClient.get(`/${insightsParams.mediaId}/insights`, {
           metric: insightsParams.metrics.join(','),
           period: insightsParams.period,
-          since: insightsParams.since,
-          until: insightsParams.until,
-        });
-        break;
-
-      case 'get_account_insights':
-        const accountParams = z.object({
-          userId: z.string(),
-          metrics: z.array(z.string()),
-          period: z.string().optional(),
-          since: z.string().optional(),
-          until: z.string().optional(),
-        }).parse(args);
-        
-        result = await apiClient.get(`/${accountParams.userId}/threads_insights`, {
-          metric: accountParams.metrics.join(','),
-          period: accountParams.period,
-          since: accountParams.since,
-          until: accountParams.until,
         });
         break;
 
       case 'search_threads':
-        const searchParams = z.object({
-          query: z.string(),
-          type: z.enum(['top', 'recent']).optional(),
-          count: z.number().optional(),
-          since: z.string().optional(),
-          until: z.string().optional(),
-        }).parse(args);
-        
+        const searchParams = args as any;
         result = await apiClient.get('/search', {
           q: searchParams.query,
           type: searchParams.type || 'top',
           count: searchParams.count || 50,
-          since: searchParams.since,
-          until: searchParams.until,
         });
-        break;
-
-      case 'manage_reply':
-        const manageParams = z.object({
-          replyId: z.string(),
-          hide: z.boolean(),
-        }).parse(args);
-        
-        result = await apiClient.post(`/${manageParams.replyId}/manage`, {
-          hide: manageParams.hide,
-        });
-        break;
-
-      case 'get_publishing_limit':
-        const { limitUserId } = z.object({
-          limitUserId: z.string(),
-        }).parse(args);
-        
-        result = await apiClient.get(`/${limitUserId}/threads_publishing_limit`);
         break;
 
       default:
@@ -243,6 +317,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
+// Start the server
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);

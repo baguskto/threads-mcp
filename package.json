@@ -4,6 +4,7 @@
   "description": "Meta Threads MCP Server for comprehensive API access and data analysis",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "type": "module",
   "bin": {
     "threads-mcp": "./dist/index.js"
   },

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "threads": {
+      "command": "node",
+      "args": ["/Users/baguskto/Downloads/Work/Personal/threads-mcp/dist/index.js"],
+      "env": {
+        "THREADS_ACCESS_TOKEN": "THAAKkf4EuyQ5BUVFTR2F5eDJNaXBNMmk0YURHZAm1yZAUZA2Q2l4TlpHTVpYVkVpS0VfanVpdjVUSjVnM3ZA2Y0FkSjh3bFJCZAzQ5aFE3VE9MN3pMXzI5YmItcW1DQ2MwX3lORmp2YTlkMEZAPbzRHbVZAoRnF4bEJQTl9aVXBTUnFzblMxbzRGVVItT29PSFNISncZD"
+      }
+    }
+  }
+}
