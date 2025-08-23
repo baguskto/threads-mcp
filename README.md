@@ -90,7 +90,7 @@ Get your own threads/posts
 ```
 
 #### `publish_thread`
-Create and publish a new thread
+Create and publish a new thread using Threads API two-step process
 ```typescript
 {
   text: string;           // Thread content (required)
@@ -99,6 +99,7 @@ Create and publish a new thread
   location_name?: string; // Location tagging
 }
 ```
+*Note: This function implements the proper two-step Threads publishing flow: first creates a media container, then publishes it. The response includes both the container ID and final thread ID.*
 
 #### `delete_thread`
 Delete one of your threads

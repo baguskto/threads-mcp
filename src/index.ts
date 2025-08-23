@@ -307,7 +307,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         // Get current user ID
         const user: any = await apiClient.get('/me', { fields: 'id' });
-        result = await apiClient.post(`/${user.id}/threads`, publishData);
+        
+        // Step 1: Create media container
+        const containerResponse: any = await apiClient.post(`/${user.id}/threads`, publishData);
+        
+        if (!containerResponse.id) {
+          throw new Error('Failed to create media container');
+        }
+        
+        // Step 2: Publish the container
+        result = await apiClient.post(`/${user.id}/threads_publish`, {
+          creation_id: containerResponse.id
+        });
+        
+        // Return combined result with both container and publish info
+        result = {
+          ...result,
+          container_id: containerResponse.id,
+          original_data: publishData
+        };
         break;
 
       case 'delete_thread':
