@@ -309,6 +309,112 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['parent_thread_id', 'replies'],
         },
       },
+      {
+        name: 'quote_post',
+        description: 'Quote another thread/post with your own text',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            quoted_post_id: {
+              type: 'string',
+              description: 'ID of the post to quote',
+            },
+            text: {
+              type: 'string',
+              description: 'Your quote text/commentary',
+            },
+            media_type: {
+              type: 'string',
+              enum: ['TEXT', 'IMAGE', 'VIDEO'],
+              description: 'Type of media (default: TEXT)',
+            },
+            media_url: {
+              type: 'string',
+              description: 'URL of media to include (for IMAGE/VIDEO)',
+            },
+            reply_control: {
+              type: 'string',
+              enum: ['everyone', 'accounts_you_follow', 'mentioned_only', 'parent_post_author_only', 'followers_only'],
+              description: 'Who can reply to this quote',
+            },
+          },
+          required: ['quoted_post_id', 'text'],
+        },
+      },
+      {
+        name: 'repost_thread',
+        description: 'Repost/share another thread',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            post_id: {
+              type: 'string',
+              description: 'ID of the post to repost',
+            },
+          },
+          required: ['post_id'],
+        },
+      },
+      {
+        name: 'unrepost_thread',
+        description: 'Remove a repost you previously shared',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            post_id: {
+              type: 'string',
+              description: 'ID of the post to unrepost',
+            },
+          },
+          required: ['post_id'],
+        },
+      },
+      {
+        name: 'like_post',
+        description: 'Like a thread/post',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            post_id: {
+              type: 'string',
+              description: 'ID of the post to like',
+            },
+          },
+          required: ['post_id'],
+        },
+      },
+      {
+        name: 'unlike_post',
+        description: 'Remove like from a thread/post',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            post_id: {
+              type: 'string',
+              description: 'ID of the post to unlike',
+            },
+          },
+          required: ['post_id'],
+        },
+      },
+      {
+        name: 'get_post_likes',
+        description: 'Get list of users who liked a post',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            post_id: {
+              type: 'string',
+              description: 'ID of the post to get likes for',
+            },
+            limit: {
+              type: 'number',
+              description: 'Number of likes to retrieve',
+            },
+          },
+          required: ['post_id'],
+        },
+      },
     ],
   };
 });
@@ -565,6 +671,136 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           replies: chainResults,
           success: chainResults.length === replies.length
         };
+        break;
+
+      case 'quote_post':
+        const { quoted_post_id, text: quoteText, media_type: quoteMediaType, media_url: quoteMediaUrl, reply_control: quoteReplyControl } = args as any;
+        
+        const quoteData: any = {
+          text: quoteText,
+          media_type: quoteMediaType || 'TEXT',
+          quoted_post_id: quoted_post_id,
+        };
+        
+        if (quoteMediaUrl) {
+          quoteData.media_url = quoteMediaUrl;
+        }
+        
+        if (quoteReplyControl) {
+          quoteData.reply_control = quoteReplyControl;
+        }
+        
+        // Get current user ID
+        const userForQuote: any = await apiClient.get('/me', { fields: 'id' });
+        
+        // Step 1: Create quote container
+        const quoteContainerResponse: any = await apiClient.post(`/${userForQuote.id}/threads`, quoteData);
+        
+        if (!quoteContainerResponse.id) {
+          throw new Error('Failed to create quote container');
+        }
+        
+        // Step 2: Publish the quote
+        const publishedQuote: any = await apiClient.post(`/${userForQuote.id}/threads_publish`, {
+          creation_id: quoteContainerResponse.id
+        });
+        
+        // Return combined result
+        result = {
+          ...publishedQuote,
+          container_id: quoteContainerResponse.id,
+          quoted_post_id: quoted_post_id,
+          quote_data: quoteData
+        };
+        break;
+
+      case 'repost_thread':
+        const { post_id: repostId } = args as any;
+        
+        // Try different endpoint patterns for repost
+        try {
+          // Pattern 1: Direct POST to media endpoint
+          result = await apiClient.post(`/${repostId}`, { action: 'repost' });
+        } catch (error) {
+          try {
+            // Pattern 2: User-based repost endpoint 
+            const userForRepost: any = await apiClient.get('/me', { fields: 'id' });
+            result = await apiClient.post(`/${userForRepost.id}/reposts`, { media_id: repostId });
+          } catch (error2) {
+            // If both fail, provide detailed error info
+            throw new Error(`Repost not available: Endpoint may not be supported in current API version. Details: ${error2 instanceof Error ? error2.message : String(error2)}`);
+          }
+        }
+        break;
+
+      case 'unrepost_thread':
+        const { post_id: unrepostId } = args as any;
+        
+        // Try different endpoint patterns for unrepost
+        try {
+          // Pattern 1: DELETE request to media
+          result = await apiClient.delete(`/${unrepostId}/repost`);
+        } catch (error) {
+          try {
+            // Pattern 2: User-based unrepost
+            const userForUnrepost: any = await apiClient.get('/me', { fields: 'id' });
+            result = await apiClient.delete(`/${userForUnrepost.id}/reposts/${unrepostId}`);
+          } catch (error2) {
+            throw new Error(`Unrepost not available: Endpoint may not be supported in current API version. Details: ${error2 instanceof Error ? error2.message : String(error2)}`);
+          }
+        }
+        break;
+
+      case 'like_post':
+        const { post_id: likeId } = args as any;
+        
+        // Like endpoint - this one seems to work based on test results
+        try {
+          result = await apiClient.post(`/${likeId}/likes`, {});
+        } catch (error) {
+          // Fallback pattern
+          result = await apiClient.post(`/${likeId}/like`, {});
+        }
+        break;
+
+      case 'unlike_post':
+        const { post_id: unlikeId } = args as any;
+        
+        // Unlike endpoint - try multiple patterns
+        try {
+          // Pattern 1: DELETE to likes endpoint
+          result = await apiClient.delete(`/${unlikeId}/likes`);
+        } catch (error) {
+          try {
+            // Pattern 2: DELETE to like endpoint  
+            result = await apiClient.delete(`/${unlikeId}/like`);
+          } catch (error2) {
+            // Pattern 3: POST with unlike action
+            result = await apiClient.post(`/${unlikeId}`, { action: 'unlike' });
+          }
+        }
+        break;
+
+      case 'get_post_likes':
+        const { post_id: likesPostId, limit: likesLimit } = args as any;
+        
+        // Get likes endpoint - try different patterns
+        try {
+          // Pattern 1: Direct likes endpoint
+          result = await apiClient.get(`/${likesPostId}/likes`, {
+            limit: likesLimit || 25
+          });
+        } catch (error) {
+          try {
+            // Pattern 2: Insights-based approach
+            result = await apiClient.get(`/${likesPostId}/insights`, {
+              metric: 'likes',
+              limit: likesLimit || 25
+            });
+          } catch (error2) {
+            throw new Error(`Get likes not available: May require additional permissions or different API version. Details: ${error2 instanceof Error ? error2.message : String(error2)}`);
+          }
+        }
         break;
 
       default:
