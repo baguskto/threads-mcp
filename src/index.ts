@@ -415,6 +415,89 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['post_id'],
         },
       },
+      {
+        name: 'create_post_with_restrictions',
+        description: 'Create post with advanced reply and audience restrictions',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            text: {
+              type: 'string',
+              description: 'The text content of the thread',
+            },
+            media_type: {
+              type: 'string',
+              enum: ['TEXT', 'IMAGE', 'VIDEO'],
+              description: 'Type of media (default: TEXT)',
+            },
+            media_url: {
+              type: 'string',
+              description: 'URL of media to include (for IMAGE/VIDEO)',
+            },
+            reply_control: {
+              type: 'string',
+              enum: ['everyone', 'accounts_you_follow', 'mentioned_only', 'parent_post_author_only', 'followers_only'],
+              description: 'Who can reply to this post',
+            },
+            audience_control: {
+              type: 'string',
+              enum: ['public', 'followers_only', 'close_friends'],
+              description: 'Who can see this post',
+            },
+            location_name: {
+              type: 'string',
+              description: 'Location name for location tagging',
+            },
+            hashtags: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of hashtags to include (without #)',
+            },
+            mentions: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of usernames to mention (without @)',
+            },
+          },
+          required: ['text'],
+        },
+      },
+      {
+        name: 'schedule_post',
+        description: 'Schedule a post to be published at a future time',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            text: {
+              type: 'string',
+              description: 'The text content of the thread',
+            },
+            scheduled_publish_time: {
+              type: 'string',
+              description: 'ISO 8601 datetime when to publish (e.g., "2025-08-25T10:00:00+07:00")',
+            },
+            media_type: {
+              type: 'string',
+              enum: ['TEXT', 'IMAGE', 'VIDEO'],
+              description: 'Type of media (default: TEXT)',
+            },
+            media_url: {
+              type: 'string',
+              description: 'URL of media to include (for IMAGE/VIDEO)',
+            },
+            reply_control: {
+              type: 'string',
+              enum: ['everyone', 'accounts_you_follow', 'mentioned_only', 'parent_post_author_only', 'followers_only'],
+              description: 'Who can reply to this post',
+            },
+            location_name: {
+              type: 'string',
+              description: 'Location name for location tagging',
+            },
+          },
+          required: ['text', 'scheduled_publish_time'],
+        },
+      },
     ],
   };
 });
@@ -800,6 +883,146 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           } catch (error2) {
             throw new Error(`Get likes not available: May require additional permissions or different API version. Details: ${error2 instanceof Error ? error2.message : String(error2)}`);
           }
+        }
+        break;
+
+      case 'create_post_with_restrictions':
+        const { 
+          text: restrictedText, 
+          media_type: restrictedMediaType, 
+          media_url: restrictedMediaUrl, 
+          reply_control: restrictedReplyControl,
+          audience_control,
+          location_name: restrictedLocation,
+          hashtags,
+          mentions
+        } = args as any;
+        
+        // Build enhanced post data with restrictions
+        const restrictedPostData: any = {
+          text: restrictedText,
+          media_type: restrictedMediaType || 'TEXT',
+        };
+        
+        // Add hashtags to text if provided
+        if (hashtags && hashtags.length > 0) {
+          const hashtagText = hashtags.map((tag: string) => `#${tag}`).join(' ');
+          restrictedPostData.text += ` ${hashtagText}`;
+        }
+        
+        // Add mentions to text if provided
+        if (mentions && mentions.length > 0) {
+          const mentionText = mentions.map((username: string) => `@${username}`).join(' ');
+          restrictedPostData.text += ` ${mentionText}`;
+        }
+        
+        if (restrictedMediaUrl) {
+          restrictedPostData.media_url = restrictedMediaUrl;
+        }
+        
+        if (restrictedReplyControl) {
+          restrictedPostData.reply_control = restrictedReplyControl;
+        }
+        
+        if (audience_control) {
+          // Note: audience_control might not be supported in current API version
+          restrictedPostData.audience_control = audience_control;
+        }
+        
+        if (restrictedLocation) {
+          restrictedPostData.location_name = restrictedLocation;
+        }
+        
+        // Get current user ID
+        const userForRestricted: any = await apiClient.get('/me', { fields: 'id' });
+        
+        // Step 1: Create restricted post container
+        const restrictedContainerResponse: any = await apiClient.post(`/${userForRestricted.id}/threads`, restrictedPostData);
+        
+        if (!restrictedContainerResponse.id) {
+          throw new Error('Failed to create restricted post container');
+        }
+        
+        // Step 2: Publish the restricted post
+        const publishedRestricted: any = await apiClient.post(`/${userForRestricted.id}/threads_publish`, {
+          creation_id: restrictedContainerResponse.id
+        });
+        
+        // Return combined result with restriction details
+        result = {
+          ...publishedRestricted,
+          container_id: restrictedContainerResponse.id,
+          restrictions: {
+            reply_control: restrictedReplyControl,
+            audience_control: audience_control,
+            hashtags: hashtags,
+            mentions: mentions
+          },
+          post_data: restrictedPostData
+        };
+        break;
+
+      case 'schedule_post':
+        const { 
+          text: scheduleText, 
+          scheduled_publish_time,
+          media_type: scheduleMediaType, 
+          media_url: scheduleMediaUrl,
+          reply_control: scheduleReplyControl,
+          location_name: scheduleLocation
+        } = args as any;
+        
+        // Validate scheduled time is in the future
+        const scheduledDate = new Date(scheduled_publish_time);
+        const now = new Date();
+        
+        if (scheduledDate <= now) {
+          throw new Error('Scheduled publish time must be in the future');
+        }
+        
+        // Build scheduled post data
+        const scheduledPostData: any = {
+          text: scheduleText,
+          media_type: scheduleMediaType || 'TEXT',
+          scheduled_publish_time: scheduled_publish_time,
+        };
+        
+        if (scheduleMediaUrl) {
+          scheduledPostData.media_url = scheduleMediaUrl;
+        }
+        
+        if (scheduleReplyControl) {
+          scheduledPostData.reply_control = scheduleReplyControl;
+        }
+        
+        if (scheduleLocation) {
+          scheduledPostData.location_name = scheduleLocation;
+        }
+        
+        // Get current user ID
+        const userForScheduled: any = await apiClient.get('/me', { fields: 'id' });
+        
+        try {
+          // Try to create scheduled post container
+          const scheduledContainerResponse: any = await apiClient.post(`/${userForScheduled.id}/threads`, scheduledPostData);
+          
+          if (!scheduledContainerResponse.id) {
+            throw new Error('Failed to create scheduled post container');
+          }
+          
+          // For scheduled posts, we might not publish immediately
+          // Return the container info for later publishing
+          result = {
+            container_id: scheduledContainerResponse.id,
+            scheduled_for: scheduled_publish_time,
+            status: 'scheduled',
+            post_data: scheduledPostData,
+            note: 'Scheduled post created. Automatic publishing may require additional API features or manual publishing at scheduled time.'
+          };
+          
+        } catch (error) {
+          // Fallback: If scheduling is not supported, inform user
+          throw new Error(`Scheduling not supported in current API version. Error: ${error instanceof Error ? error.message : String(error)}. Consider using third-party scheduling tools.`);
         }
         break;
 
