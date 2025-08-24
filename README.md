@@ -187,8 +187,9 @@ Get performance metrics for your specific thread
 
 ## 📊 Test Results
 
-**Latest Test Results**: ✅ 6/7 core functions + 2 NEW reply features working perfectly
+**Latest Test Results**: ✅ 10+ functions working + Complete Phase 1 implementation!
 
+### Core Functions
 | Tool | Status | Notes |
 |------|--------|-------|
 | `get_my_profile` | ✅ Working | Full profile data |
@@ -198,8 +199,22 @@ Get performance metrics for your specific thread
 | `publish_thread` | ✅ Working | **Successfully publishes!** |
 | `delete_thread` | ⚠️ Limited | Error 400 (endpoint issue) |
 | `get_my_insights` | ⚠️ Limited | Error 500 (permission/endpoint) |
-| `create_reply` | ✅ **NEW** | **Creates real replies!** |
-| `create_thread_chain` | ✅ **NEW** | **True threaded conversations!** |
+
+### Phase 1: Complete Engagement & Advanced Posting (NEW)
+| Tool | Status | Notes |
+|------|--------|-------|
+| `create_reply` | ✅ **Phase 1** | **Creates real replies!** |
+| `create_thread_chain` | ✅ **Phase 1** | **True threaded conversations!** |
+| `quote_post` | ✅ **Phase 1A** | **Quote tweets with commentary!** |
+| `like_post` | 🔧 **Phase 1A** | Implemented with fallback patterns |
+| `unlike_post` | 🔧 **Phase 1A** | Implemented with fallback patterns |
+| `repost_thread` | 🔧 **Phase 1A** | Implemented with fallback patterns |
+| `unrepost_thread` | 🔧 **Phase 1A** | Implemented with fallback patterns |
+| `get_post_likes` | 🔧 **Phase 1A** | Implemented with fallback patterns |
+| `create_post_with_restrictions` | ✅ **Phase 1B** | **Advanced posts with hashtags!** |
+| `schedule_post` | ✅ **Phase 1B** | **Future post scheduling!** |
+
+**Total Tools**: 21 functions (11 original + 10 new Phase 1 features)
 
 ## 💡 Usage Examples
 
@@ -213,6 +228,38 @@ Get performance metrics for your specific thread
 
 # Search my content
 @threads search "project" in my threads
+```
+
+### Phase 1A: Engagement & Interaction
+```bash
+# Quote another post with your commentary
+@threads quote post 123456 "This is exactly what I was thinking! Adding my perspective..."
+
+# Like and unlike posts
+@threads like post 123456
+@threads unlike post 123456
+
+# Repost content (share to your timeline)
+@threads repost thread 123456
+@threads unrepost thread 123456
+
+# Get engagement data
+@threads get likes for post 123456 limit 50
+```
+
+### Phase 1B: Advanced Posting
+```bash  
+# Create post with hashtags and restrictions
+@threads create advanced post "My latest project update!" 
+  hashtags: ["WebDev", "MCP", "Threads"]
+  mentions: ["techfriend", "developer"]
+  reply_control: "followers_only"
+  location: "San Francisco"
+
+# Schedule posts for future publishing
+@threads schedule post "Good morning! ☀️" 
+  for: "2025-08-25T08:00:00+07:00"
+  reply_control: "everyone"
 ```
 
 ### Reply & Thread Management
