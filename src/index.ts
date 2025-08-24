@@ -624,6 +624,100 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
         },
       },
+      {
+        name: 'search_users',
+        description: 'Search for users by username or display name',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Username or display name to search for',
+            },
+            limit: {
+              type: 'number',
+              description: 'Number of users to return',
+            },
+          },
+          required: ['query'],
+        },
+      },
+      {
+        name: 'get_user_followers',
+        description: 'Get followers list for a user',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            user_id: {
+              type: 'string',
+              description: 'User ID to get followers for (defaults to current user)',
+            },
+            limit: {
+              type: 'number',
+              description: 'Number of followers to retrieve',
+            },
+          },
+        },
+      },
+      {
+        name: 'get_user_following',
+        description: 'Get following list for a user',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            user_id: {
+              type: 'string',
+              description: 'User ID to get following for (defaults to current user)',
+            },
+            limit: {
+              type: 'number',
+              description: 'Number of following to retrieve',
+            },
+          },
+        },
+      },
+      {
+        name: 'follow_user',
+        description: 'Follow a user',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            user_id: {
+              type: 'string',
+              description: 'User ID to follow',
+            },
+          },
+          required: ['user_id'],
+        },
+      },
+      {
+        name: 'unfollow_user',
+        description: 'Unfollow a user',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            user_id: {
+              type: 'string',
+              description: 'User ID to unfollow',
+            },
+          },
+          required: ['user_id'],
+        },
+      },
+      {
+        name: 'block_user',
+        description: 'Block a user',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            user_id: {
+              type: 'string',
+              description: 'User ID to block',
+            },
+          },
+          required: ['user_id'],
+        },
+      },
     ],
   };
 });
@@ -1289,6 +1383,122 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             timeframe: trendingTimeframe,
             note: 'Trending posts found via keyword search. Results may vary based on API availability.'
           };
+        }
+        break;
+
+      case 'search_users':
+        const { query: userSearchQuery, limit: userSearchLimit } = args as any;
+        
+        try {
+          // Try user search endpoint if available
+          result = await apiClient.get('/users/search', {
+            q: userSearchQuery,
+            limit: userSearchLimit || 25,
+          });
+        } catch (error) {
+          // Fallback: Use keyword search to find mentions/references to users
+          const mentionSearch = await apiClient.get('/keyword_search', {
+            q: `@${userSearchQuery}`,
+            search_type: 'RECENT',
+            limit: userSearchLimit || 25,
+          });
+          
+          result = {
+            search_method: 'mention_based_fallback',
+            query: userSearchQuery,
+            note: 'User search via mention discovery. Limited to users mentioned in posts.',
+            mention_results: mentionSearch,
+            limitation: 'Direct user search may require additional API permissions or endpoints not yet available.'
+          };
+        }
+        break;
+
+      case 'get_user_followers':
+        const { user_id: followersUserId, limit: followersLimit } = args as any;
+        
+        // Default to current user if no user_id specified
+        const currentUserForFollowers: any = await apiClient.get('/me', { fields: 'id' });
+        const targetFollowersUserId = followersUserId || currentUserForFollowers.id;
+        
+        try {
+          // Try followers endpoint
+          result = await apiClient.get(`/${targetFollowersUserId}/followers`, {
+            limit: followersLimit || 25,
+          });
+        } catch (error) {
+          throw new Error(`Followers access not available: This feature may require additional API permissions or is not yet supported. Details: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        break;
+
+      case 'get_user_following':
+        const { user_id: followingUserId, limit: followingLimit } = args as any;
+        
+        // Default to current user if no user_id specified  
+        const currentUserForFollowing: any = await apiClient.get('/me', { fields: 'id' });
+        const targetFollowingUserId = followingUserId || currentUserForFollowing.id;
+        
+        try {
+          // Try following endpoint
+          result = await apiClient.get(`/${targetFollowingUserId}/following`, {
+            limit: followingLimit || 25,
+          });
+        } catch (error) {
+          throw new Error(`Following access not available: This feature may require additional API permissions or is not yet supported. Details: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        break;
+
+      case 'follow_user':
+        const { user_id: followUserId } = args as any;
+        
+        try {
+          // Try follow endpoint
+          result = await apiClient.post(`/${followUserId}/follow`, {});
+        } catch (error) {
+          try {
+            // Alternative pattern
+            const currentUserForFollow: any = await apiClient.get('/me', { fields: 'id' });
+            result = await apiClient.post(`/${currentUserForFollow.id}/following`, {
+              user_id: followUserId
+            });
+          } catch (error2) {
+            throw new Error(`Follow action not available: This feature may require additional API permissions or is not yet supported in current API version. Details: ${error2 instanceof Error ? error2.message : String(error2)}`);
+          }
+        }
+        break;
+
+      case 'unfollow_user':
+        const { user_id: unfollowUserId } = args as any;
+        
+        try {
+          // Try unfollow endpoint
+          result = await apiClient.delete(`/${unfollowUserId}/follow`);
+        } catch (error) {
+          try {
+            // Alternative pattern
+            const currentUserForUnfollow: any = await apiClient.get('/me', { fields: 'id' });
+            result = await apiClient.delete(`/${currentUserForUnfollow.id}/following/${unfollowUserId}`);
+          } catch (error2) {
+            throw new Error(`Unfollow action not available: This feature may require additional API permissions or is not yet supported in current API version. Details: ${error2 instanceof Error ? error2.message : String(error2)}`);
+          }
+        }
+        break;
+
+      case 'block_user':
+        const { user_id: blockUserId } = args as any;
+        
+        try {
+          // Try block endpoint
+          result = await apiClient.post(`/${blockUserId}/block`, {});
+        } catch (error) {
+          try {
+            // Alternative pattern
+            const currentUserForBlock: any = await apiClient.get('/me', { fields: 'id' });
+            result = await apiClient.post(`/${currentUserForBlock.id}/blocked_users`, {
+              user_id: blockUserId
+            });
+          } catch (error2) {
+            throw new Error(`Block action not available: This feature may require additional API permissions or is not yet supported in current API version. Details: ${error2 instanceof Error ? error2.message : String(error2)}. Note: User blocking may only be available through the web interface.`);
+          }
         }
         break;
 
