@@ -1,0 +1,56 @@
+# Source files
+src/
+*.ts
+!dist/**/*.d.ts
+
+# Test files
+tests/
+test-*.mjs
+test-*.js
+test-*.sh
+*.test.ts
+*.spec.ts
+
+# Development files
+.env
+.env.local
+.env.*.local
+*.log
+npm-debug.log*
+
+# Documentation files (keep only essential)
+FITUR_BARU.md
+INSTALASI_CLAUDE_CODE.md
+LIMITASI_DAN_SOLUSI.md
+PRIVACY.md
+TERMS.md
+
+# Config files
+tsconfig.json
+.eslintrc*
+.prettierrc*
+jest.config.*
+
+# Git and CI
+.git/
+.github/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Build artifacts (except dist)
+coverage/
+*.tsbuildinfo
+
+# Misc
+node_modules/
+.npm/
+.yarn/
+*.pid
+*.seed
+*.pid.lock

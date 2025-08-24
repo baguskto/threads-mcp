@@ -10,10 +10,12 @@
   },
   "scripts": {
     "build": "tsc",
+    "clean": "rm -rf dist",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "prepublishOnly": "npm run build",
-    "test": "jest"
+    "prepublishOnly": "npm run clean && npm run build",
+    "test": "echo 'No tests configured yet'",
+    "lint": "tsc --noEmit"
   },
   "keywords": [
     "mcp",
@@ -55,5 +57,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/baguskto/threads-mcp.git"
-  }
+  },
+  "bugs": {
+    "url": "https://github.com/baguskto/threads-mcp/issues"
+  },
+  "homepage": "https://github.com/baguskto/threads-mcp#readme"
 }

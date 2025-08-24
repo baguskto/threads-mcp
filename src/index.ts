@@ -13,8 +13,8 @@ dotenv.config();
 
 const server = new Server(
   {
-    name: 'threads-personal-manager',
-    version: '2.0.0',
+    name: 'threads-mcp-server',
+    version: '4.0.0',
   },
   {
     capabilities: {
