@@ -879,14 +879,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       // Phase 3B: Professional Content Creation & Automation
       {
         name: 'create_carousel_post',
-        description: 'Create multi-image/video carousel posts with advanced options',
+        description: 'Create multi-media carousel posts with up to 20 items (September 2024 update)',
         inputSchema: {
           type: 'object',
           properties: {
             media_urls: {
               type: 'array',
               items: { type: 'string' },
-              description: 'Array of image/video URLs for carousel (2-10 items)',
+              description: 'Array of image/video URLs for carousel (2-20 items supported)',
+              minItems: 2,
+              maxItems: 20,
             },
             text: {
               type: 'string',
@@ -1079,6 +1081,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['integration_type'],
         },
       },
+      
+      // NEW: Token validation and diagnostics
+      {
+        name: 'validate_setup',
+        description: 'Validate access token, check scopes, and verify business account setup',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            check_scopes: {
+              type: 'boolean',
+              description: 'Check if all required scopes are present',
+              default: true,
+            },
+            required_scopes: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Custom list of required scopes to check',
+            },
+          },
+        },
+      },
     ],
   };
 });
@@ -1120,40 +1143,71 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'publish_thread':
         const { text, media_type, media_url, location_name } = args as any;
         
-        const publishData: any = {
-          text,
+        // Get current user ID first
+        const user: any = await apiClient.get('/me', { fields: 'id' });
+        
+        // Build the proper container data based on media type
+        const containerData: any = {
           media_type: media_type || 'TEXT',
         };
         
-        if (media_url) {
-          publishData.media_url = media_url;
+        // Add text if provided
+        if (text) {
+          containerData.text = text;
         }
         
+        // Handle different media types with correct parameter names
+        if (media_type === 'IMAGE' && media_url) {
+          containerData.image_url = media_url; // Use image_url for images
+        } else if (media_type === 'VIDEO' && media_url) {
+          containerData.video_url = media_url; // Use video_url for videos
+        } else if (media_url && !media_type) {
+          // Auto-detect media type from URL
+          if (media_url.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+            containerData.media_type = 'IMAGE';
+            containerData.image_url = media_url;
+          } else if (media_url.match(/\.(mp4|mov|avi)$/i)) {
+            containerData.media_type = 'VIDEO';
+            containerData.video_url = media_url;
+          }
+        }
+        
+        // Add location if provided
         if (location_name) {
-          publishData.location_name = location_name;
+          containerData.location_name = location_name;
         }
         
-        // Get current user ID
-        const user: any = await apiClient.get('/me', { fields: 'id' });
-        
-        // Step 1: Create media container
-        const containerResponse: any = await apiClient.post(`/${user.id}/threads`, publishData);
-        
-        if (!containerResponse.id) {
-          throw new Error('Failed to create media container');
+        try {
+          // Step 1: Create media container
+          const containerResponse: any = await apiClient.post(`/${user.id}/threads`, containerData);
+          
+          if (!containerResponse.id) {
+            throw new Error('Failed to create media container. Make sure your account has proper permissions.');
+          }
+          
+          // Step 2: Publish the container
+          result = await apiClient.post(`/${user.id}/threads_publish`, {
+            creation_id: containerResponse.id
+          });
+          
+          // Return combined result with both container and publish info
+          result = {
+            ...result,
+            container_id: containerResponse.id,
+            media_type: containerData.media_type,
+            published: true,
+            original_data: containerData
+          };
+        } catch (error) {
+          // Provide helpful error messages
+          if (error instanceof Error && error.message.includes('OAuth')) {
+            throw new Error(`Authentication error: Make sure your access token has 'threads_content_publish' scope. ${error.message}`);
+          } else if (error instanceof Error && error.message.includes('media')) {
+            throw new Error(`Media upload error: Ensure media URL is publicly accessible and in supported format (JPG, PNG, GIF for images; MP4, MOV for videos). ${error.message}`);
+          } else {
+            throw error;
+          }
         }
-        
-        // Step 2: Publish the container
-        result = await apiClient.post(`/${user.id}/threads_publish`, {
-          creation_id: containerResponse.id
-        });
-        
-        // Return combined result with both container and publish info
-        result = {
-          ...result,
-          container_id: containerResponse.id,
-          original_data: publishData
-        };
         break;
 
       case 'delete_thread':
@@ -2197,50 +2251,105 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         } = args as any;
         
         try {
-          // Validate carousel requirements
-          if (!carouselUrls || carouselUrls.length < 2 || carouselUrls.length > 10) {
-            throw new Error('Carousel posts require 2-10 media items');
+          // Validate carousel requirements (now supports up to 20 items!)
+          if (!carouselUrls || carouselUrls.length < 2 || carouselUrls.length > 20) {
+            throw new Error('Carousel posts require 2-20 media items (updated September 2024)');
           }
           
           const currentUserForCarousel: any = await apiClient.get('/me', { fields: 'id' });
           
-          // Create carousel post using Threads API
-          // Note: As of 2024, Threads API may have limitations on carousel creation
-          // This implementation provides a structure for when carousel API becomes available
+          // NEW: 3-step carousel creation process (September 2024 update)
           
-          const carouselData = {
-            text: carouselText,
+          // Step 1: Create individual carousel item containers
+          const carouselItemIds: string[] = [];
+          
+          for (let i = 0; i < carouselUrls.length; i++) {
+            const url = carouselUrls[i];
+            const altText = carouselAltTexts?.[i] || 
+                          (carouselSettings?.auto_alt_text ? `Item ${i + 1} of ${carouselUrls.length}` : undefined);
+            
+            // Determine media type
+            const isVideo = url.match(/\.(mp4|mov|avi)$/i);
+            const mediaType = isVideo ? 'VIDEO' : 'IMAGE';
+            
+            const itemData: any = {
+              media_type: mediaType,
+              is_carousel_item: true, // NEW: Required flag for carousel items
+            };
+            
+            // Use correct parameter for media type
+            if (mediaType === 'IMAGE') {
+              itemData.image_url = url;
+            } else {
+              itemData.video_url = url;
+            }
+            
+            // Add alt text if provided
+            if (altText) {
+              itemData.alt_text = altText;
+            }
+            
+            const itemContainer = await apiClient.post(`/${currentUserForCarousel.id}/threads`, itemData) as any;
+            
+            if (!itemContainer.id) {
+              throw new Error(`Failed to create carousel item ${i + 1}`);
+            }
+            
+            carouselItemIds.push(itemContainer.id);
+          }
+          
+          // Step 2: Create carousel container with all items
+          const carouselContainerData: any = {
             media_type: 'CAROUSEL',
-            children: carouselUrls.map((url: string, index: number) => ({
-              media_url: url,
-              alt_text: carouselAltTexts?.[index] || (carouselSettings?.auto_alt_text ? `Image ${index + 1} of carousel post` : ''),
-              media_type: url.includes('.mp4') || url.includes('.mov') ? 'VIDEO' : 'IMAGE'
-            })),
+            children: carouselItemIds.join(','), // Comma-separated list of item IDs
+          };
+          
+          // Add caption text if provided
+          if (carouselText) {
+            carouselContainerData.text = carouselText;
+          }
+          
+          const carouselContainer = await apiClient.post(`/${currentUserForCarousel.id}/threads`, carouselContainerData) as any;
+          
+          if (!carouselContainer.id) {
+            throw new Error('Failed to create carousel container');
+          }
+          
+          // Step 3: Publish the carousel
+          const publishResult = await apiClient.post(`/${currentUserForCarousel.id}/threads_publish`, {
+            creation_id: carouselContainer.id
+          }) as any;
+          
+          result = {
+            id: publishResult.id,
+            permalink: publishResult.permalink,
+            carousel_created: true,
+            carousel_container_id: carouselContainer.id,
+            carousel_item_ids: carouselItemIds,
+            media_count: carouselUrls.length,
             carousel_metadata: {
               total_items: carouselUrls.length,
               aspect_ratio: carouselSettings?.aspect_ratio || 'auto',
-              thumbnail_selection: carouselSettings?.thumbnail_selection || 'first'
-            }
+              thumbnail_selection: carouselSettings?.thumbnail_selection || 'first',
+              accessibility_enabled: !!carouselAltTexts?.length
+            },
+            professional_features: [
+              'multi_media_carousel_v2',
+              'accessibility_support',
+              'up_to_20_items',
+              '3_step_creation_process'
+            ]
           };
           
-          // Attempt to create carousel post
-          try {
-            result = await apiClient.post(`/${currentUserForCarousel.id}/threads`, carouselData);
-            
-            result = {
-              ...result,
-              carousel_created: true,
-              carousel_metadata: carouselData.carousel_metadata,
-              accessibility_features: carouselAltTexts?.length > 0,
-              professional_features: ['multi_media_carousel', 'accessibility_support', 'aspect_ratio_optimization']
-            };
-          } catch (carouselError) {
-            // Fallback: Create individual posts for each media item with reference
-            throw new Error(`Carousel creation not yet supported by Threads API. Current API limitations prevent multi-media carousel posts. Consider creating individual posts or using single media post with multiple images mentioned in caption. Error: ${carouselError instanceof Error ? carouselError.message : String(carouselError)}`);
-          }
-          
         } catch (error) {
-          throw new Error(`Carousel post creation failed: ${error instanceof Error ? error.message : String(error)}`);
+          // Provide detailed error information
+          if (error instanceof Error && error.message.includes('OAuth')) {
+            throw new Error(`Authentication error: Make sure your access token has 'threads_content_publish' scope and your account is a verified business account. ${error.message}`);
+          } else if (error instanceof Error && error.message.includes('carousel')) {
+            throw new Error(`Carousel creation error: ${error.message}. Ensure all media URLs are publicly accessible and in supported formats.`);
+          } else {
+            throw new Error(`Carousel post creation failed: ${error instanceof Error ? error.message : String(error)}`);
+          }
         }
         break;
 
@@ -2949,6 +3058,93 @@ add_action('publish_post', 'auto_crosspost_to_threads');
         }
         break;
 
+      case 'validate_setup':
+        const { check_scopes: checkScopes = true, required_scopes: customScopes } = args as any;
+        
+        try {
+          // Step 1: Validate token
+          const tokenValidation = await apiClient.validateToken();
+          
+          let scopeValidation = null;
+          if (checkScopes) {
+            // Step 2: Check scopes
+            scopeValidation = await apiClient.checkScopes(customScopes);
+          }
+          
+          // Step 3: Test basic API access
+          let profileAccess = null;
+          try {
+            const profile = await apiClient.get('/me', { fields: 'id,username,name' }) as any;
+            profileAccess = {
+              success: true,
+              profile: {
+                id: profile.id,
+                username: profile.username,
+                name: profile.name
+              }
+            };
+          } catch (error) {
+            profileAccess = {
+              success: false,
+              error: error instanceof Error ? error.message : String(error)
+            };
+          }
+          
+          result = {
+            validation_timestamp: new Date().toISOString(),
+            token_validation: tokenValidation,
+            scope_validation: scopeValidation,
+            profile_access: profileAccess,
+            setup_recommendations: [],
+            status: 'unknown'
+          };
+          
+          // Generate recommendations based on results
+          if (!tokenValidation.valid) {
+            result.setup_recommendations.push('❌ Access token is invalid. Please generate a new token from Meta Developer Console.');
+            result.status = 'invalid_token';
+          } else if (scopeValidation && !scopeValidation.hasRequired) {
+            result.setup_recommendations.push(`❌ Missing required scopes: ${scopeValidation.missing.join(', ')}. Please regenerate your access token with all required permissions.`);
+            result.status = 'missing_scopes';
+          } else if (!profileAccess.success) {
+            if (profileAccess.error && profileAccess.error.includes('business account')) {
+              result.setup_recommendations.push('❌ Business account required. Convert your Instagram account to a business account and complete Meta Business verification.');
+              result.status = 'business_account_required';
+            } else {
+              result.setup_recommendations.push(`❌ Profile access failed: ${profileAccess.error}`);
+              result.status = 'profile_access_failed';
+            }
+          } else {
+            result.setup_recommendations.push('✅ Setup appears to be correct! All validations passed.');
+            result.status = 'valid';
+          }
+          
+          // Add setup instructions
+          if (result.status !== 'valid') {
+            result.setup_instructions = [
+              '1. Convert Instagram to Business Account (in Instagram app settings)',
+              '2. Complete Meta Business verification (may take 1-3 days)',
+              '3. Create Meta Developer App at developers.facebook.com',
+              '4. Add "Threads API" product to your app',
+              '5. Request required scopes: threads_basic, threads_content_publish, threads_manage_insights, threads_read_replies',
+              '6. Complete OAuth flow with business Instagram account',
+              '7. Use the generated access token in your MCP configuration'
+            ];
+          }
+          
+        } catch (error) {
+          result = {
+            validation_timestamp: new Date().toISOString(),
+            status: 'error',
+            error: error instanceof Error ? error.message : String(error),
+            setup_recommendations: [
+              '❌ Unable to validate setup. Check your network connection and access token.',
+              'Ensure your THREADS_ACCESS_TOKEN environment variable is set correctly.'
+            ]
+          };
+        }
+        break;
+
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -2978,7 +3174,7 @@ add_action('publish_post', 'auto_crosspost_to_threads');
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Threads Personal Manager MCP server running on stdio');
+  console.error('Threads Personal Manager MCP server v5.0.0 running on stdio');
 }
 
 main().catch((error) => {

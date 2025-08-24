@@ -38,6 +38,30 @@ Complete social media management solution with advanced analytics, content optim
 npm install -g threads-mcp-server
 ```
 
+### ⚠️ **IMPORTANT: Business Account Required**
+
+**This MCP server requires a verified Instagram Business Account with proper API access.**
+
+### Prerequisites Setup
+
+**1. Instagram Business Account:**
+- Convert your Instagram to a Business Account
+- Complete Meta Business verification (1-3 days)
+- Ensure you have 100+ followers for demographic analytics
+
+**2. Meta Developer Setup:**
+- Create a Meta Developer App at [developers.facebook.com](https://developers.facebook.com)
+- Add "Threads API" product to your app
+- Request these required scopes:
+  - `threads_basic`
+  - `threads_content_publish` 
+  - `threads_manage_insights`
+  - `threads_read_replies`
+
+**3. OAuth Access Token:**
+- Complete OAuth flow with your business Instagram account
+- Generate an access token with all required scopes
+
 ### Configuration
 
 Create a `.env` file with your Threads access token:
@@ -45,6 +69,23 @@ Create a `.env` file with your Threads access token:
 ```env
 THREADS_ACCESS_TOKEN=your_access_token_here
 ```
+
+### ✅ **Validate Your Setup**
+
+After configuration, test your setup:
+
+```bash
+# Run the MCP server and test
+@threads validate_setup
+```
+
+This will check:
+- ✅ Token validity
+- ✅ Required scopes
+- ✅ Business account access
+- ✅ API permissions
+
+Follow any recommendations provided by the validation tool.
 
 ### Claude Desktop Setup
 
@@ -198,6 +239,35 @@ Get performance metrics for your specific thread
   thread_id: string;    // Your thread ID
   metrics: string[];    // e.g., ['views', 'likes', 'replies']
   period?: string;      // Time period for metrics
+}
+```
+
+### 🔧 Setup Validation & Diagnostics
+
+#### `validate_setup`
+**NEW in v5.0.0** - Comprehensive setup validation and diagnostics
+```typescript
+{
+  check_scopes?: boolean;          // Check if all required scopes are present
+  required_scopes?: string[];      // Custom list of required scopes to check
+}
+```
+
+**What it checks:**
+- ✅ Access token validity
+- ✅ Required API scopes
+- ✅ Business account verification
+- ✅ Profile access permissions
+- 📋 Provides specific setup recommendations
+
+**Example response:**
+```json
+{
+  "status": "valid",
+  "token_validation": { "valid": true },
+  "scope_validation": { "hasRequired": true, "missing": [] },
+  "profile_access": { "success": true },
+  "setup_recommendations": ["✅ Setup appears to be correct!"]
 }
 ```
 

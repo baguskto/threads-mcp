@@ -6,6 +6,7 @@ export class ThreadsAPIClient {
   private client: AxiosInstance;
   private accessToken: string;
   private baseURL = 'https://graph.threads.net/v1.0';
+  private requiredScopes = ['threads_basic', 'threads_content_publish', 'threads_manage_insights', 'threads_read_replies'];
 
   constructor(accessToken: string) {
     this.accessToken = accessToken;
@@ -56,16 +57,20 @@ export class ThreadsAPIClient {
           continue;
         }
         
-        // Re-throw the original axios error so the calling code can handle it
-        throw error;
+        // Use enhanced error handling
+        throw this.handleAPIError(error);
       }
     }
     throw new Error('Max retries exceeded');
   }
 
   async post<T>(endpoint: string, data?: Record<string, any>): Promise<T> {
-    const response = await this.client.post<T>(endpoint, data);
-    return response.data;
+    try {
+      const response = await this.client.post<T>(endpoint, data);
+      return response.data;
+    } catch (error: any) {
+      throw this.handleAPIError(error);
+    }
   }
 
   async delete<T>(endpoint: string, retries = 3): Promise<T> {
@@ -85,7 +90,7 @@ export class ThreadsAPIClient {
           continue;
         }
         
-        throw error;
+        throw this.handleAPIError(error);
       }
     }
     throw new Error('Max retries exceeded');
@@ -120,5 +125,81 @@ export class ThreadsAPIClient {
 
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // NEW: Validate access token and scopes
+  async validateToken(): Promise<{ valid: boolean; scopes?: string[]; error?: string }> {
+    try {
+      // Use the debug_token endpoint to check token validity and scopes
+      const response = await this.client.get('/debug_token', {
+        params: {
+          input_token: this.accessToken,
+          access_token: this.accessToken
+        }
+      });
+      
+      return {
+        valid: true,
+        scopes: response.data?.data?.scopes || [],
+      };
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error?.message || error.message;
+      return {
+        valid: false,
+        error: `Token validation failed: ${errorMessage}`
+      };
+    }
+  }
+
+  // NEW: Check if required scopes are available
+  async checkScopes(requiredScopes: string[] = this.requiredScopes): Promise<{ hasRequired: boolean; missing: string[] }> {
+    const tokenInfo = await this.validateToken();
+    
+    if (!tokenInfo.valid || !tokenInfo.scopes) {
+      return { hasRequired: false, missing: requiredScopes };
+    }
+
+    const missing = requiredScopes.filter(scope => !tokenInfo.scopes!.includes(scope));
+    
+    return {
+      hasRequired: missing.length === 0,
+      missing
+    };
+  }
+
+  // NEW: Enhanced error handling with helpful messages
+  private handleAPIError(error: any): Error {
+    const apiError = error.response?.data?.error;
+    
+    if (!apiError) {
+      return error;
+    }
+
+    const { code, message, error_subcode, fbtrace_id } = apiError;
+    
+    // Provide helpful error messages for common issues
+    if (code === 190) {
+      return new Error(`Authentication failed: ${message}. Please check your access token and ensure it has proper scopes: ${this.requiredScopes.join(', ')}`);
+    }
+    
+    if (code === 200 && error_subcode === 1360028) {
+      return new Error(`Business account required: ${message}. Convert your Instagram account to a business account and complete Meta Business verification.`);
+    }
+    
+    if (code === 100) {
+      return new Error(`Invalid parameter: ${message}. Check your request format and ensure media URLs are publicly accessible.`);
+    }
+    
+    if (code === 10 && message.includes('scope')) {
+      return new Error(`Permission denied: ${message}. Your access token is missing required scopes. Required: ${this.requiredScopes.join(', ')}`);
+    }
+    
+    if (code === 4) {
+      return new Error(`Rate limit exceeded: ${message}. Please wait before making more requests.`);
+    }
+
+    // Generic error with trace ID for debugging
+    const traceInfo = fbtrace_id ? ` (Trace ID: ${fbtrace_id})` : '';
+    return new Error(`Threads API Error (${code}): ${message}${traceInfo}`);
   }
 }

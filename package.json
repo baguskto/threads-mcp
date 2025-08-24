@@ -1,7 +1,7 @@
 {
   "name": "threads-mcp-server",
-  "version": "4.0.1",
-  "description": "Enterprise Threads MCP Server - Complete social media management with analytics & automation",
+  "version": "5.0.0",
+  "description": "Professional Threads MCP Server - Fixed API issues, enhanced setup validation, and enterprise features",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
