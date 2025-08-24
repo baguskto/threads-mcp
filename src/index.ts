@@ -498,6 +498,132 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['text', 'scheduled_publish_time'],
         },
       },
+      {
+        name: 'search_posts',
+        description: 'Search for posts using keywords',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Search keyword or phrase',
+            },
+            search_type: {
+              type: 'string',
+              enum: ['TOP', 'RECENT'],
+              description: 'Search results order: TOP (popular) or RECENT (chronological)',
+            },
+            limit: {
+              type: 'number',
+              description: 'Number of results to return (max 100, default 25)',
+            },
+            since: {
+              type: 'string',
+              description: 'ISO 8601 date to search from',
+            },
+            until: {
+              type: 'string',
+              description: 'ISO 8601 date to search until',
+            },
+          },
+          required: ['query'],
+        },
+      },
+      {
+        name: 'search_mentions',
+        description: 'Search for posts that mention you or specific users',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            user_id: {
+              type: 'string',
+              description: 'User ID to search mentions for (defaults to current user)',
+            },
+            limit: {
+              type: 'number',
+              description: 'Number of mentions to retrieve',
+            },
+            since: {
+              type: 'string',
+              description: 'ISO 8601 date to search from',
+            },
+            until: {
+              type: 'string',
+              description: 'ISO 8601 date to search until',
+            },
+          },
+        },
+      },
+      {
+        name: 'search_by_hashtags',
+        description: 'Search for posts by hashtag or topic tags',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            hashtags: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Hashtags to search for (without #)',
+            },
+            search_type: {
+              type: 'string',
+              enum: ['TOP', 'RECENT'],
+              description: 'Search results order',
+            },
+            limit: {
+              type: 'number',
+              description: 'Number of results to return',
+            },
+          },
+          required: ['hashtags'],
+        },
+      },
+      {
+        name: 'search_by_topics',
+        description: 'Search for posts by topic tags',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            topics: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Topic tags to search for',
+            },
+            search_type: {
+              type: 'string',
+              enum: ['TOP', 'RECENT'],
+              description: 'Search results order',
+            },
+            limit: {
+              type: 'number',
+              description: 'Number of results to return',
+            },
+          },
+          required: ['topics'],
+        },
+      },
+      {
+        name: 'get_trending_posts',
+        description: 'Get trending/popular posts in various categories',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            category: {
+              type: 'string',
+              description: 'Trending category (optional)',
+            },
+            limit: {
+              type: 'number',
+              description: 'Number of trending posts to retrieve',
+            },
+            timeframe: {
+              type: 'string',
+              enum: ['hour', 'day', 'week'],
+              description: 'Trending timeframe',
+            },
+          },
+        },
+      },
     ],
   };
 });
@@ -1023,6 +1149,146 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         } catch (error) {
           // Fallback: If scheduling is not supported, inform user
           throw new Error(`Scheduling not supported in current API version. Error: ${error instanceof Error ? error.message : String(error)}. Consider using third-party scheduling tools.`);
+        }
+        break;
+
+      case 'search_posts':
+        const { query: searchQuery, search_type: searchType, limit: searchPostsLimit, since: searchSince, until: searchUntil } = args as any;
+        
+        // Build search parameters
+        const searchParams: any = {
+          q: searchQuery,
+          search_type: searchType || 'TOP',
+          limit: searchPostsLimit || 25,
+        };
+        
+        if (searchSince) {
+          searchParams.since = searchSince;
+        }
+        
+        if (searchUntil) {
+          searchParams.until = searchUntil;
+        }
+        
+        // Use the keyword_search endpoint
+        result = await apiClient.get('/keyword_search', searchParams);
+        break;
+
+      case 'search_mentions':
+        const { user_id: mentionUserId, limit: searchMentionsLimit, since: mentionSince, until: mentionUntil } = args as any;
+        
+        // If no user_id specified, use current user
+        const meUser: any = await apiClient.get('/me', { fields: 'id' });
+        const targetUserId = mentionUserId || meUser.id;
+        
+        try {
+          // Try direct mentions endpoint first
+          result = await apiClient.get(`/${targetUserId}/mentions`, {
+            limit: searchMentionsLimit || 25,
+            since: mentionSince,
+            until: mentionUntil,
+          });
+        } catch (error) {
+          // Fallback: search for @username mentions
+          const userInfo: any = await apiClient.get(`/${targetUserId}`, { fields: 'username' });
+          const mentionQuery = `@${userInfo.username}`;
+          
+          result = await apiClient.get('/keyword_search', {
+            q: mentionQuery,
+            search_type: 'RECENT',
+            limit: searchMentionsLimit || 25,
+            since: mentionSince,
+            until: mentionUntil,
+          });
+          
+          // Add context that this is a fallback search
+          result = {
+            ...result,
+            search_method: 'keyword_fallback',
+            search_query: mentionQuery,
+            note: 'Results found via keyword search for @username mentions'
+          };
+        }
+        break;
+
+      case 'search_by_hashtags':
+        const { hashtags: searchHashtags, search_type: hashtagSearchType, limit: hashtagSearchLimit } = args as any;
+        
+        // Combine hashtags into search query
+        const hashtagQuery = searchHashtags.map((tag: string) => `#${tag}`).join(' OR ');
+        
+        result = await apiClient.get('/keyword_search', {
+          q: hashtagQuery,
+          search_mode: 'TAG',
+          search_type: hashtagSearchType || 'TOP',
+          limit: hashtagSearchLimit || 25,
+        });
+        
+        // Add hashtag context
+        result = {
+          ...result,
+          searched_hashtags: searchHashtags,
+          search_query: hashtagQuery
+        };
+        break;
+
+      case 'search_by_topics':
+        const { topics: searchTopics, search_type: topicSearchType, limit: topicSearchLimit } = args as any;
+        
+        // Search for topics using TAG mode
+        const topicQuery = searchTopics.join(' OR ');
+        
+        result = await apiClient.get('/keyword_search', {
+          q: topicQuery,
+          search_mode: 'TAG',
+          search_type: topicSearchType || 'TOP',
+          limit: topicSearchLimit || 25,
+        });
+        
+        // Add topic context
+        result = {
+          ...result,
+          searched_topics: searchTopics,
+          search_query: topicQuery
+        };
+        break;
+
+      case 'get_trending_posts':
+        const { category: trendingCategory, limit: trendingPostsLimit, timeframe: trendingTimeframe } = args as any;
+        
+        try {
+          // Try trending endpoint if available
+          result = await apiClient.get('/trending', {
+            category: trendingCategory,
+            limit: trendingPostsLimit || 25,
+            timeframe: trendingTimeframe || 'day',
+          });
+        } catch (error) {
+          // Fallback: Use keyword search with popular terms
+          const trendingQueries = [
+            'trending',
+            'viral',
+            'popular',
+            'breaking news',
+            'hot topics'
+          ];
+          
+          const trendingQuery = trendingCategory || trendingQueries[Math.floor(Math.random() * trendingQueries.length)];
+          
+          result = await apiClient.get('/keyword_search', {
+            q: trendingQuery,
+            search_type: 'TOP',
+            limit: trendingPostsLimit || 25,
+          });
+          
+          // Add trending context
+          result = {
+            ...result,
+            search_method: 'keyword_trending',
+            category: trendingCategory,
+            timeframe: trendingTimeframe,
+            note: 'Trending posts found via keyword search. Results may vary based on API availability.'
+          };
         }
         break;
 
