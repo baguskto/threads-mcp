@@ -1,18 +1,34 @@
-# 📱 Threads Personal Manager - MCP Server
+# 🚀 Enterprise Threads MCP Server
 
-A focused MCP (Model Context Protocol) server for **personal Threads management**. Manage your own Threads content, analytics, and interactions with ease.
+A comprehensive MCP (Model Context Protocol) server for **professional Threads management** with enterprise-grade analytics, AI-powered optimization, and automation features.
 
-## 🎯 **Personal Management Focus**
+## 🎯 **Enterprise-Ready Platform**
 
-This MCP server is designed specifically for managing **YOUR OWN** Threads content. No more external user limitations - just powerful personal content management tools.
+Complete social media management solution with advanced analytics, content optimization, and professional automation tools for businesses and power users.
 
-## ✨ Features
+## ✨ Enterprise Features
 
+### 📊 **Phase 3A: Enhanced Analytics & Performance Analysis**
+- **Advanced Insights**: Demographic breakdowns, geographic analysis, time-series data
+- **Audience Analytics**: Detailed follower demographics and behavior patterns
+- **Engagement Trends**: Comprehensive trend analysis with growth projections
+- **AI-Driven Optimization**: Optimal posting times and performance recommendations
+- **Business Intelligence**: Professional reporting with comprehensive metrics
+
+### 🚀 **Phase 3B: Professional Content Creation & Automation**
+- **AI Hashtag Suggestions**: Smart, industry-specific hashtag recommendations
+- **Content Optimization**: Professional analysis with scoring and recommendations
+- **Advanced Scheduling**: Automation with optimal timing and recurring posts
+- **Bulk Operations**: Performance analysis, content audit, and data export
+- **Website Integration**: Embed feeds, share buttons, and cross-platform sync
+- **Carousel Posts**: Multi-media posts with accessibility features
+
+### 🎯 **Core Management Features**
 - **Content Management**: Create, view, search, and delete your threads
-- **Analytics**: Get insights on your account and thread performance  
-- **Interaction Management**: Handle replies and mentions
-- **Search**: Find content within your own threads
-- **Publishing Control**: Check limits and manage your posting
+- **Analytics Dashboard**: Real-time insights and performance metrics
+- **Interaction Management**: Handle replies, mentions, and user relationships
+- **Search & Discovery**: Advanced search with filters and content discovery
+- **Publishing Control**: Rate limits, scheduling, and automation
 
 ## 🚀 Quick Start
 
@@ -182,6 +198,178 @@ Get performance metrics for your specific thread
   thread_id: string;    // Your thread ID
   metrics: string[];    // e.g., ['views', 'likes', 'replies']
   period?: string;      // Time period for metrics
+}
+```
+
+## 🏢 Enterprise Analytics & Automation Tools (Phase 3)
+
+### 📊 Advanced Analytics
+
+#### `get_enhanced_insights`
+Get comprehensive analytics with demographic breakdowns
+```typescript
+{
+  thread_id?: string;           // Optional thread ID for media insights
+  metrics: string[];            // views, likes, replies, followers_count, follower_demographics
+  period?: string;              // day, week, month, lifetime
+  breakdown?: string[];         // country, city, age, gender
+  since?: string;               // ISO 8601 start date
+  until?: string;               // ISO 8601 end date
+}
+```
+
+#### `get_audience_demographics`
+Detailed audience demographic analysis
+```typescript
+{
+  categories: string[];         // country, age, gender, city
+  period?: string;             // day, week, month, lifetime
+  breakdown?: string;          // Demographic breakdown level
+}
+```
+
+#### `get_engagement_trends`
+Time-series analysis of engagement patterns
+```typescript
+{
+  metrics: string[];           // views, likes, replies, shares
+  timeframe?: string;          // week, month, quarter
+  granularity?: string;        // daily, weekly
+}
+```
+
+#### `get_follower_growth_analytics`
+Follower growth analysis with projections
+```typescript
+{
+  period?: string;             // month, quarter, year
+  include_projections?: boolean; // Include growth forecasts
+  projection_days?: number;    // Days to project forward
+}
+```
+
+#### `analyze_best_posting_times`
+AI-driven optimal posting time analysis
+```typescript
+{
+  analysis_period?: string;    // week, month, quarter
+  timezone?: string;           // User's timezone
+  content_type?: string;       // general, promotional, educational
+}
+```
+
+#### `get_content_performance_report`
+Comprehensive performance reporting
+```typescript
+{
+  report_type: string;         // summary, detailed, top_performers
+  period: string;              // week, month, quarter
+  metrics: string[];           // Performance metrics to include
+  include_comparisons?: boolean; // Period-over-period comparisons
+}
+```
+
+### 🚀 Professional Content Creation & Automation
+
+#### `auto_hashtag_suggestions`
+AI-powered hashtag recommendations
+```typescript
+{
+  content: string;             // Content to analyze
+  media_url?: string;          // Optional media for visual analysis
+  suggestion_settings?: {
+    count?: number;            // Number of suggestions (1-10)
+    style?: string;            // trending, niche, branded, mixed
+    exclude_overused?: boolean; // Filter out overused hashtags
+    industry_focus?: string;   // Industry/niche focus
+  }
+}
+```
+
+#### `content_optimization_analysis`
+Professional content analysis with recommendations
+```typescript
+{
+  content: string;             // Content to analyze
+  analysis_type?: string;      // engagement, reach, accessibility, seo, comprehensive
+  target_audience?: {
+    demographics?: string[];   // Target demographic groups
+    interests?: string[];      // Target interests
+    timezone?: string;         // Primary audience timezone
+  };
+  optimization_goals?: string[]; // increase_engagement, expand_reach, etc.
+}
+```
+
+#### `schedule_post`
+Advanced scheduling with automation features
+```typescript
+{
+  text: string;                // Post content
+  media_url?: string;          // Optional media URL
+  schedule_time?: string;      // ISO 8601 datetime for scheduling
+  automation_settings?: {
+    auto_optimize_time?: boolean; // Auto-optimize posting time
+    recurring?: string;        // none, daily, weekly, monthly
+    auto_hashtags?: boolean;   // Auto-add relevant hashtags
+    content_variation?: boolean; // Create variations for recurring posts
+  };
+  timezone?: string;           // Timezone for scheduling
+}
+```
+
+#### `create_carousel_post`
+Multi-media carousel posts with accessibility
+```typescript
+{
+  media_urls: string[];        // 2-10 image/video URLs
+  text: string;                // Post caption
+  alt_texts?: string[];        // Alt text for accessibility
+  carousel_settings?: {
+    auto_alt_text?: boolean;   // Generate alt text automatically
+    aspect_ratio?: string;     // square, portrait, landscape
+    thumbnail_selection?: string; // auto, first, custom
+  }
+}
+```
+
+#### `bulk_post_management`
+Bulk operations and content management
+```typescript
+{
+  action: string;              // analyze_performance, content_audit, export_data
+  filters?: {
+    date_range?: { start: string; end: string };
+    content_type?: string;     // text, image, video, carousel
+    performance_threshold?: string; // low, medium, high
+  };
+  bulk_operations?: {
+    add_hashtags?: string[];   // Hashtags to add
+    update_alt_text?: boolean; // Update alt text
+    archive_low_performers?: boolean; // Archive underperforming posts
+  }
+}
+```
+
+#### `website_integration_setup`
+Website integration and cross-platform sync
+```typescript
+{
+  integration_type: string;    // embed_feed, share_buttons, webhook_setup, auto_crosspost
+  website_config?: {
+    domain?: string;           // Website domain
+    platform?: string;        // wordpress, shopify, custom, react, vue, angular
+    styling_preferences?: {
+      theme?: string;          // light, dark, auto
+      layout?: string;         // grid, list, carousel
+      post_count?: number;     // Number of posts to display
+    }
+  };
+  automation_settings?: {
+    auto_sync?: boolean;       // Auto-sync new posts
+    crosspost_enabled?: boolean; // Enable cross-posting
+    webhook_url?: string;      // Webhook endpoint URL
+  }
 }
 ```
 

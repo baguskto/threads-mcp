@@ -1,7 +1,7 @@
 {
   "name": "threads-mcp-server",
-  "version": "3.0.0",
-  "description": "Threads Personal Manager - MCP Server for personal Threads content management",
+  "version": "4.0.0",
+  "description": "Enterprise Threads MCP Server - Complete social media management with analytics & automation",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
@@ -20,7 +20,13 @@
     "threads",
     "meta",
     "api",
-    "modelcontextprotocol"
+    "modelcontextprotocol",
+    "analytics",
+    "automation",
+    "enterprise",
+    "social-media",
+    "ai-powered",
+    "content-optimization"
   ],
   "author": "baguskto",
   "license": "MIT",
