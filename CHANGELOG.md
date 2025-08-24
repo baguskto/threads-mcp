@@ -5,6 +5,27 @@ All notable changes to the Threads MCP Server project will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.1] - 2024-08-24
+
+### 🧹 Project Cleanup & Organization
+
+#### Changed
+- Moved all test files to `tests/` directory for better organization
+- Enhanced `.gitignore` with comprehensive patterns
+- Added `.npmignore` for optimized NPM package size
+- Updated server name to match package name
+- Added clean and lint scripts to package.json
+
+#### Added
+- Comprehensive `CHANGELOG.md` with full version history
+- `CONTRIBUTING.md` with contribution guidelines
+- `.env.example` for easy project setup
+
+#### Fixed
+- Version consistency across all files
+- Removed empty utils directory
+- Organized project structure following best practices
+
 ## [4.0.0] - 2024-08-24
 
 ### 🚀 Major Release - Enterprise Platform
