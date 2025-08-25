@@ -1,6 +1,6 @@
 {
   "name": "threads-mcp-server",
-  "version": "5.0.0",
+  "version": "5.1.0",
   "description": "Professional Threads MCP Server - Fixed API issues, enhanced setup validation, and enterprise features",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
