@@ -66,7 +66,7 @@ export class ThreadsAPIClient {
 
   async post<T>(endpoint: string, data?: Record<string, any>): Promise<T> {
     try {
-      const response = await this.client.post<T>(endpoint, data);
+      const response = await this.client.post<T>(endpoint, null, { params: data });
       return response.data;
     } catch (error: any) {
       throw this.handleAPIError(error);
