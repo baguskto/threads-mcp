@@ -913,7 +913,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       
       {
-        name: 'schedule_post',
+        name: 'schedule_post_advanced',
         description: 'Schedule posts with advanced automation and optimal timing',
         inputSchema: {
           type: 'object',
@@ -2362,10 +2362,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         break;
 
-      case 'schedule_post':
-        const { 
-          text: scheduleText, 
-          media_url: scheduleMediaUrl, 
+      case 'schedule_post_advanced':
+        const {
+          text: scheduleText,
+          media_url: scheduleMediaUrl,
           schedule_time: scheduleTime,
           automation_settings: automationSettings,
           timezone: scheduleTimezone
