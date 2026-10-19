@@ -35,14 +35,14 @@ const publishRoutes = (onContainer?: (call: RecordedCall) => void): Routes => {
   return {
     'POST /123/threads': (call) => {
       onContainer?.(call);
-      return { id: `c${++n}` };
+      return { id: `100${++n}` };
     },
     'GET *': (call) => {
       const id = call.url.pathname.split('/').pop()!;
-      if (id.startsWith('c')) return { id, status: 'FINISHED' };
+      if (id.startsWith('100')) return { id, status: 'FINISHED' };
       return { id, permalink: `https://www.threads.com/@me/post/${id}` };
     },
-    'POST /123/threads_publish': (call) => ({ id: `m-${param(call, 'creation_id')}` }),
+    'POST /123/threads_publish': (call) => ({ id: `9${param(call, 'creation_id')}` }),
   };
 };
 
@@ -88,8 +88,8 @@ test('publish_thread creates a container, waits for it and publishes', async () 
     share_to_instagram_story: true,
   });
   assert.equal(res.isError, false, res.text);
-  assert.equal(res.json.id, 'm-c1');
-  assert.equal(res.json.container_id, 'c1');
+  assert.equal(res.json.id, '91001');
+  assert.equal(res.json.container_id, '1001');
   assert.match(res.json.permalink, /threads\.com/);
   const create = calls.find((c) => c.method === 'POST' && c.url.pathname.endsWith('/threads'))!;
   assert.equal(param(create, 'media_type'), 'TEXT');
@@ -98,7 +98,7 @@ test('publish_thread creates a container, waits for it and publishes', async () 
   assert.equal(param(create, 'crossreshare_to_ig'), 'true');
   assert.deepEqual(JSON.parse(param(create, 'poll_attachment')!), { option_a: 'Yes', option_b: 'No' });
   const order = calls.map((c) => `${c.method} ${c.url.pathname.replace('/v1.0', '')}`);
-  assert.deepEqual(order.slice(0, 3), ['POST /123/threads', 'GET /c1', 'POST /123/threads_publish']);
+  assert.deepEqual(order.slice(0, 3), ['POST /123/threads', 'GET /1001', 'POST /123/threads_publish']);
 });
 
 test('publish_thread maps legacy media_type/media_url and rejects invalid combos', async () => {
@@ -119,8 +119,8 @@ test('publish_thread maps legacy media_type/media_url and rejects invalid combos
 
 test('publishing surfaces container processing errors', async () => {
   const { call } = await connect({
-    'POST /123/threads': () => ({ id: 'c1' }),
-    'GET /c1': () => ({ id: 'c1', status: 'ERROR', error_message: 'Unsupported video codec' }),
+    'POST /123/threads': () => ({ id: '1001' }),
+    'GET /1001': () => ({ id: '1001', status: 'ERROR', error_message: 'Unsupported video codec' }),
   });
   const res = await call('publish_thread', { video_url: 'https://example.com/v.mp4' });
   assert.equal(res.isError, true);
@@ -146,7 +146,7 @@ test('create_carousel_post builds item containers then the carousel', async () =
   assert.equal(param(creates[1], 'media_type'), 'VIDEO');
   assert.equal(param(creates[1], 'video_url'), 'https://example.com/2.mp4');
   assert.equal(param(creates[3], 'media_type'), 'CAROUSEL');
-  assert.equal(param(creates[3], 'children'), 'c1,c2,c3');
+  assert.equal(param(creates[3], 'children'), '1001,1002,1003');
 });
 
 test('carousel accepts up to 20 items and rejects 21', async () => {
@@ -161,10 +161,10 @@ test('create_thread_chain links each part to the previous one', async () => {
   const { call } = await connect(publishRoutes((c) => creates.push(c)));
   const res = await call('create_thread_chain', { replies: [{ text: '1/3' }, { text: '2/3' }, { text: '3/3' }] });
   assert.equal(res.isError, false, res.text);
-  assert.equal(res.json.root_id, 'm-c1');
+  assert.equal(res.json.root_id, '91001');
   assert.equal(param(creates[0], 'reply_to_id'), null);
-  assert.equal(param(creates[1], 'reply_to_id'), 'm-c1');
-  assert.equal(param(creates[2], 'reply_to_id'), 'm-c2');
+  assert.equal(param(creates[1], 'reply_to_id'), '91001');
+  assert.equal(param(creates[2], 'reply_to_id'), '91002');
 });
 
 test('quote_post and create_reply send the right ids', async () => {
@@ -178,12 +178,12 @@ test('quote_post and create_reply send the right ids', async () => {
 
 test('repost, delete and manage_reply hit the documented endpoints', async () => {
   const { call, calls } = await connect({
-    'POST /555/repost': () => ({ id: 'r1' }),
-    'DELETE /r1': () => ({ success: true, deleted_id: 'r1' }),
+    'POST /555/repost': () => ({ id: '777001' }),
+    'DELETE /777001': () => ({ success: true, deleted_id: '777001' }),
     'POST /777/manage_reply': () => ({ success: true }),
   });
-  assert.equal((await call('repost_thread', { post_id: '555' })).json.repost_id, 'r1');
-  assert.equal((await call('delete_thread', { thread_id: 'r1' })).json.deleted, true);
+  assert.equal((await call('repost_thread', { post_id: '555' })).json.repost_id, '777001');
+  assert.equal((await call('delete_thread', { thread_id: '777001' })).json.deleted, true);
   assert.equal((await call('manage_reply', { reply_id: '777', hide: true })).json.success, true);
   assert.equal(param(calls[2], 'hide'), 'true');
 });
@@ -323,11 +323,11 @@ test('rejects combinations the Threads API does not allow', async () => {
 test('publish: false stages a container without publishing', async () => {
   const { call, calls } = await connect(publishRoutes());
   const res = await call('publish_thread', { text: 'Draft', publish: false });
-  assert.equal(res.json.container_id, 'c1');
+  assert.equal(res.json.container_id, '1001');
   assert.equal(res.json.published, false);
   assert.ok(!calls.some((c) => c.url.pathname.endsWith('/threads_publish')));
-  const published = await call('publish_container', { container_id: 'c1' });
-  assert.equal(published.json.id, 'm-c1');
+  const published = await call('publish_container', { container_id: '1001' });
+  assert.equal(published.json.id, '91001');
 });
 
 test('create_thread_chain validates every part before publishing', async () => {
@@ -345,9 +345,9 @@ test('create_thread_chain reports where to resume after a failure', async () => 
     ...routes,
     'POST /123/threads': (c) => (++n === 2 ? Response.json({ error: { message: 'Boom', code: 1 } }, { status: 400 }) : routes['POST /123/threads'](c)),
   });
-  const res = await call('create_thread_chain', { parent_thread_id: 'p0', replies: [{ text: 'a' }, { text: 'b' }] });
+  const res = await call('create_thread_chain', { parent_thread_id: '500', replies: [{ text: 'a' }, { text: 'b' }] });
   assert.equal(res.isError, true);
-  assert.match(res.text, /Resume with parent_thread_id=m-c1/);
+  assert.match(res.text, /resume with parent_thread_id=91001 and parts 2–2/);
 });
 
 test('read-only mode only exposes read tools and no scheduler', async () => {
@@ -405,4 +405,163 @@ test('create_web_intent_link builds follow and post links', async () => {
   assert.equal((await call('create_web_intent_link', { type: 'follow', username: '@zuck' })).json.url, 'https://www.threads.com/intent/follow?username=zuck');
   const post = await call('create_web_intent_link', { type: 'post', text: 'Hi there', url: 'https://example.com' });
   assert.equal(post.json.url, 'https://www.threads.com/intent/post?text=Hi+there&url=https%3A%2F%2Fexample.com');
+});
+
+// Regression tests for issues found in the pre-merge review.
+
+test('spoilers are sent on image posts and carousels, not only text posts', async () => {
+  const creates: RecordedCall[] = [];
+  const { call } = await connect(publishRoutes((c) => creates.push(c)));
+  await call('publish_thread', { text: 'Spoiler: it ends well', image_url: 'https://e.com/a.jpg', spoilers: [{ offset: 9, length: 12 }] });
+  assert.equal(param(creates[0], 'media_type'), 'IMAGE');
+  assert.deepEqual(JSON.parse(param(creates[0], 'text_entities')!), [{ entity_type: 'SPOILER', offset: 9, length: 12 }]);
+  await call('create_carousel_post', {
+    text: 'Big reveal',
+    spoilers: [{ offset: 4, length: 6 }],
+    items: [{ url: 'https://e.com/1.jpg' }, { url: 'https://e.com/2.jpg' }],
+  });
+  const carousel = creates.find((c) => param(c, 'media_type') === 'CAROUSEL')!;
+  assert.deepEqual(JSON.parse(param(carousel, 'text_entities')!), [{ entity_type: 'SPOILER', offset: 4, length: 6 }]);
+});
+
+test('get_publishing_limit still returns post/reply quotas when optional scopes are missing', async () => {
+  const { call, calls } = await connect({
+    'GET /123/threads_publishing_limit': (c) =>
+      param(c, 'fields')!.startsWith('quota_usage')
+        ? { data: [{ quota_usage: 3, config: { quota_total: 250 }, reply_quota_usage: 1 }] }
+        : Response.json({ error: { message: 'Unsupported request' } }, { status: 500 }),
+  });
+  const res = await call('get_publishing_limit');
+  assert.equal(res.isError, false, res.text);
+  assert.equal(res.json.quota_usage, 3);
+  assert.equal(res.json.unavailable.length, 2);
+  assert.equal(calls.length, 3, 'optional quota requests are not retried');
+});
+
+test('emoji sequences count as their full UTF-8 length', async () => {
+  const { threadsTextLength, countLinks } = await import('../src/tools/post-options.js');
+  assert.equal(threadsTextLength('abc'), 3);
+  assert.equal(threadsTextLength('❤️'), 6); // U+2764 + VS16
+  assert.equal(threadsTextLength('🇮🇩'), 8); // regional-indicator flag
+  assert.equal(threadsTextLength('👨‍👩‍👧'), 18); // ZWJ family
+  assert.equal(threadsTextLength('1️⃣'), 7); // keycap
+  assert.equal(threadsTextLength('é'), 1);
+  assert.equal(countLinks('see www.a.com and https://a.com/ plus http://www.b.org/x.'), 2);
+  assert.equal(countLinks('https://a.com', 'https://www.a.com/'), 1);
+});
+
+test('rejects posts over the limit because of multi-code-point emoji, and www links over the limit', async () => {
+  const { call, calls } = await connect(publishRoutes());
+  const over = await call('publish_thread', { text: 'a'.repeat(450) + '❤️'.repeat(10) });
+  assert.match(over.text, /limit is 500/);
+  const links = await call('publish_thread', { text: 'www.a.com www.b.com www.c.com www.d.com www.e.com www.f.com' });
+  assert.match(links.text, /at most 5 links/);
+  assert.equal(calls.length, 0);
+});
+
+test('THREADS_API_BASE_URL must be https (or localhost)', async () => {
+  const { loadConfig } = await import('../src/config.js');
+  assert.throws(() => loadConfig({ THREADS_API_BASE_URL: 'http://attacker.example' }), /https/);
+  assert.equal(loadConfig({ THREADS_API_BASE_URL: 'https://graph.threads.net/v1.0' }).apiVersion, 'v1.0');
+  assert.equal(loadConfig({ THREADS_API_BASE_URL: 'http://localhost:8080' }).baseUrl, 'http://localhost:8080');
+});
+
+test('media still processing after the wait budget is returned as a pending container', async () => {
+  const mock = mockFetch({
+    'POST /123/threads': () => ({ id: '1001' }),
+    'GET /1001': () => ({ id: '1001', status: 'IN_PROGRESS' }),
+  });
+  const client = new ThreadsClient({ accessToken: 'tok', userId: '123', fetch: mock.fetch, sleep: async () => {} });
+  const { server } = createServer({ accessToken: 'tok' }, { client, publish: { pollIntervalMs: 0, timeoutMs: 0 }, scheduler: false });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await server.connect(b);
+  const mcp = new Client({ name: 't', version: '1' });
+  await mcp.connect(a);
+  const res: any = await mcp.callTool({ name: 'publish_thread', arguments: { video_url: 'https://e.com/v.mp4' } });
+  assert.notEqual(res.isError, true, res.content[0].text);
+  const body = JSON.parse(res.content[0].text);
+  assert.deepEqual([body.container_id, body.published, body.status], ['1001', false, 'IN_PROGRESS']);
+  assert.ok(!mock.calls.some((c) => c.url.pathname.endsWith('/threads_publish')));
+});
+
+test('a cancelled request never publishes', async () => {
+  const { publishContainer } = await import('../src/threads/publish.js');
+  const controller = new AbortController();
+  const mock = mockFetch({
+    'GET /1001': () => {
+      controller.abort();
+      return { id: '1001', status: 'IN_PROGRESS' };
+    },
+  });
+  const client = new ThreadsClient({ accessToken: 'tok', userId: '123', fetch: mock.fetch });
+  await assert.rejects(publishContainer(client, '1001', { signal: controller.signal, pollIntervalMs: 5 }), /Cancelled before publishing/);
+  assert.ok(!mock.calls.some((c) => c.method === 'POST'));
+});
+
+test('a failed publish step reports the container id', async () => {
+  const { call } = await connect({
+    'POST /123/threads': () => ({ id: '1001' }),
+    'GET /1001': () => ({ id: '1001', status: 'FINISHED' }),
+    'POST /123/threads_publish': () => Response.json({ error: { message: 'Service unavailable', code: 2 } }, { status: 503 }),
+  });
+  const res = await call('publish_thread', { text: 'hello' });
+  assert.equal(res.isError, true);
+  assert.match(res.text, /container 1001/);
+  assert.match(res.text, /get_container_status/);
+});
+
+test('IDs are validated before they reach a URL path', async () => {
+  const { call, calls } = await connect({ 'GET *': () => ({ access_token: 'leaked' }) });
+  for (const bad of ['../refresh_access_token', '123?x=1', '%2e%2e', '123/../me']) {
+    const res = await call('get_thread', { thread_id: bad });
+    assert.equal(res.isError, true, bad);
+  }
+  assert.equal(calls.length, 0);
+  const client = new ThreadsClient({ accessToken: 't' });
+  await assert.rejects(client.get('/123/../refresh_access_token'), /Invalid API path/);
+  await assert.rejects(client.get('https://evil.example/x'), /Refusing to follow/);
+});
+
+test('get_oembed works without an access token', async () => {
+  const mock = mockFetch({ 'GET /oembed': () => ({ html: '<blockquote/>' }) });
+  const { server } = createServer({}, { fetch: mock.fetch, scheduler: false });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await server.connect(b);
+  const mcp = new Client({ name: 't', version: '1' });
+  await mcp.connect(a);
+  const res: any = await mcp.callTool({ name: 'get_oembed', arguments: { url: 'https://www.threads.com/@zuck/post/abc' } });
+  assert.notEqual(res.isError, true, res.content[0].text);
+  assert.equal(param(mock.calls[0], 'access_token'), null);
+});
+
+test('schedule_post keeps reply/quote targets for carousels and rejects single-post fields', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'threads-mcp-'));
+  try {
+    const { call } = await connect({}, { scheduleFile: join(dir, 's.json') });
+    const items = [{ url: 'https://e.com/1.jpg' }, { url: 'https://e.com/2.jpg' }];
+    const ok = await call('schedule_post', { publish_at: '2999-01-01T09:00:00+07:00', carousel_items: items, reply_to_id: '42' });
+    assert.equal(ok.isError, false, ok.text);
+    assert.equal(ok.json.payload.input.reply_to_id, '42');
+    const bad = await call('schedule_post', { publish_at: '2999-01-01T09:00:00Z', carousel_items: items, poll_options: ['a', 'b'] });
+    assert.match(bad.text, /poll_options cannot be used with carousel_items/);
+    const naive = await call('schedule_post', { publish_at: '2999-01-01T09:00:00', text: 'x' });
+    assert.equal(naive.isError, true);
+    assert.match(naive.text, /timezone offset/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a scheduled carousel reply is published with reply_to_id', async () => {
+  const { publishScheduled } = await import('../src/tools/publishing.js');
+  const creates: RecordedCall[] = [];
+  const mock = mockFetch(publishRoutes((c) => creates.push(c)));
+  const client = new ThreadsClient({ accessToken: 'tok', userId: '123', fetch: mock.fetch, sleep: async () => {} });
+  const ctx: any = { client: () => client, publish: { pollIntervalMs: 0 } };
+  await publishScheduled(ctx, {
+    kind: 'carousel',
+    input: { items: [{ url: 'https://e.com/1.jpg' }, { url: 'https://e.com/2.jpg' }], reply_to_id: '42' },
+  });
+  const carousel = creates.find((c) => param(c, 'media_type') === 'CAROUSEL')!;
+  assert.equal(param(carousel, 'reply_to_id'), '42');
 });

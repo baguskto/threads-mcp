@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { ToolContext } from '../server.js';
 import type { Page } from '../threads/client.js';
 import { MEDIA_FIELDS } from '../threads/fields.js';
+import { threadsId } from './post-options.js';
 import { fieldsParam, handler, toUnixSeconds } from './util.js';
 
 const dateInput = z.string().describe('ISO 8601 date/time or Unix timestamp');
@@ -46,7 +47,7 @@ export function registerPostTools(server: McpServer, ctx: ToolContext) {
       title: 'Get a post',
       description: 'Get a single Threads post by media ID.',
       inputSchema: z.object({
-        thread_id: z.string().describe('Threads media ID'),
+        thread_id: threadsId.describe('Threads media ID'),
         fields: z.array(z.string()).optional(),
       }),
       annotations: { readOnlyHint: true, openWorldHint: true },
@@ -84,7 +85,7 @@ export function registerPostTools(server: McpServer, ctx: ToolContext) {
     {
       title: 'Delete a post',
       description: 'Permanently delete one of your posts, replies or reposts (needs threads_delete; 100 deletes per 24 hours).',
-      inputSchema: z.object({ thread_id: z.string().describe('Media ID of your post') }),
+      inputSchema: z.object({ thread_id: threadsId.describe('Media ID of your post') }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
     },
     handler(async ({ thread_id }) => {
@@ -190,7 +191,7 @@ export function registerPostTools(server: McpServer, ctx: ToolContext) {
       }),
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    handler(async ({ url, maxwidth }) => ctx.client().get('/oembed', { url, maxwidth }, { auth: false })),
+    handler(async ({ url, maxwidth }) => ctx.publicClient().get('/oembed', { url, maxwidth }, { auth: false })),
   );
 
   server.registerTool(
@@ -198,7 +199,7 @@ export function registerPostTools(server: McpServer, ctx: ToolContext) {
     {
       title: 'Get poll results',
       description: 'Get the options, vote percentages and expiry of a poll post.',
-      inputSchema: z.object({ thread_id: z.string().describe('Media ID of the poll post') }),
+      inputSchema: z.object({ thread_id: threadsId.describe('Media ID of the poll post') }),
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     handler(async ({ thread_id }) => {

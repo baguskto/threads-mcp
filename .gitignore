@@ -53,3 +53,7 @@ package-lock.json
 *.pid
 *.seed
 *.pid.lock
+
+# Local MCP client configs (may contain tokens)
+claude_desktop_config.json
+.mcp.json

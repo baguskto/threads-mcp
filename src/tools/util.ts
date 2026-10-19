@@ -1,4 +1,4 @@
-import type { CallToolResult } from '@modelcontextprotocol/server';
+import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 import { describeError } from '../threads/errors.js';
 
 /** Wraps a JSON-serialisable value as an MCP tool result. */
@@ -23,10 +23,12 @@ export function fail(error: unknown): CallToolResult {
  * Runs a tool body and converts thrown errors into `isError` results, so the
  * model sees the Threads error message instead of a protocol failure.
  */
-export function handler<A>(fn: (args: A) => Promise<unknown>): (args: A) => Promise<CallToolResult> {
-  return async (args: A) => {
+export function handler<A>(
+  fn: (args: A, req: ServerContext) => Promise<unknown>,
+): (args: A, req: ServerContext) => Promise<CallToolResult> {
+  return async (args: A, req: ServerContext) => {
     try {
-      return ok(await fn(args));
+      return ok(await fn(args, req));
     } catch (error) {
       return fail(error);
     }

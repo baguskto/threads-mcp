@@ -11,7 +11,8 @@ A rewrite that brings the server up to date with the Threads API as of October 2
 
 ### Breaking
 
-- Requires Node.js 20.12+.
+- Requires Node.js 20+.
+- `.env` files are no longer loaded from the working directory; pass configuration through your MCP client's `env` block.
 - Removed tools that called endpoints the Threads API does not have: `like_post`, `unlike_post`, `get_post_likes`, `unrepost_thread`, `follow_user`, `unfollow_user`, `block_user`, `get_user_followers`, `get_user_following`, `get_trending_posts`, `search_users`.
 - Removed heuristic tools that returned canned or simulated results: `auto_hashtag_suggestions`, `content_optimization_analysis`, `bulk_post_management`, `website_integration_setup`, and the hard-coded posting-time recommendations.
 - Merged overlapping tools: `create_post_with_restrictions` → `publish_thread`; `search_mentions` → `get_mentions`; `search_by_hashtags` / `search_by_topics` → `search_posts` (`search_mode: "TAG"`); `get_enhanced_insights` / `get_engagement_trends` / `get_follower_growth_analytics` → `get_my_insights`.
@@ -22,11 +23,20 @@ A rewrite that brings the server up to date with the Threads API as of October 2
 
 - Publishing options from the 2024–2026 API releases: polls, GIPHY GIFs, spoiler ranges and spoiler media, long-form text attachments with styling, ghost posts, reply approvals, topic tags, location tagging, country allowlists, link previews and Instagram Story cross-sharing.
 - New tools: `get_thread`, `get_conversation`, `get_my_replies`, `get_pending_replies`, `manage_pending_reply`, `lookup_profile`, `get_profile_posts`, `get_ghost_posts`, `get_poll_results`, `get_oembed`, `search_locations`, `get_location`, `get_recently_searched_keywords`, `get_container_status`, `publish_container`, `list_scheduled_posts`, `cancel_scheduled_post`, `refresh_access_token`, `exchange_for_long_lived_token`, `create_web_intent_link`.
-- Working local scheduler: scheduled posts are stored in `~/.threads-mcp/scheduled-posts.json` and published by the server, with a file lock so two running servers never publish the same post.
+- Working local scheduler: scheduled posts are stored in `~/.threads-mcp/scheduled-posts.json` and published by the server one at a time, with a file lock and per-post claims so two running servers never publish the same post, and crash recovery that won't mark another live server's work as failed.
 - `publish: false` on `publish_thread` / `create_carousel_post` to create a draft container.
 - `get_content_performance_report` and `analyze_best_posting_times` are now computed from real per-post insights.
 - `THREADS_READ_ONLY=true` exposes only read tools.
 - Tool annotations (read-only / destructive / idempotent) and titles on every tool; server instructions warn the model to treat post content as untrusted data.
+- Publish calls honour MCP cancellation, send progress notifications while media processes, and return the pending container after `THREADS_PUBLISH_WAIT_SECONDS` (default 45) instead of running into client timeouts.
+
+### Security
+
+- The server no longer reads a `.env` from the working directory, so an untrusted project can't redirect the token to another host or change the schedule file.
+- `THREADS_API_BASE_URL` must be HTTPS (plain HTTP only for localhost).
+- IDs passed to tools must be numeric and API paths are whitelisted, so a crafted ID can't reach other endpoints such as token refresh.
+- Pagination only follows links back to the configured API host.
+- The schedule file and its directory are created with owner-only permissions.
 - Automated test suite (`npm test`) against a mocked Threads API, and a GitHub Actions workflow for Node 20, 22 and 24.
 
 ### Fixed

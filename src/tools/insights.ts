@@ -4,6 +4,7 @@ import type { ToolContext } from '../server.js';
 import type { ThreadsClient } from '../threads/client.js';
 import { describeError } from '../threads/errors.js';
 import { POST_INSIGHT_METRICS, USER_INSIGHT_METRICS } from '../threads/fields.js';
+import { threadsId } from './post-options.js';
 import { handler, toUnixSeconds } from './util.js';
 
 /** User insights are not available before this date (2024-04-13). */
@@ -104,7 +105,7 @@ export function registerInsightTools(server: McpServer, ctx: ToolContext) {
       title: 'Get post insights',
       description: 'Get views, likes, replies, reposts, quotes and shares for one of your posts (needs threads_manage_insights).',
       inputSchema: z.object({
-        thread_id: z.string(),
+        thread_id: threadsId,
         metrics: z.array(z.enum(POST_INSIGHT_METRICS)).optional().describe('Default: all'),
       }),
       annotations: { readOnlyHint: true, openWorldHint: true },

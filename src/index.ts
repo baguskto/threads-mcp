@@ -3,14 +3,10 @@ import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { loadConfig } from './config.js';
 import { createServer, VERSION } from './server.js';
 
-// Load a local .env if present. stdout carries the MCP protocol, so nothing
-// here may print to it.
-try {
-  process.loadEnvFile?.();
-} catch {
-  // No .env file; rely on the environment set by the MCP client.
-}
-
+// Configuration comes only from the environment the MCP client passes in. A
+// .env in the working directory is deliberately not read: the client may
+// launch this server inside an untrusted project. stdout carries the MCP
+// protocol, so log to stderr only.
 async function main() {
   const { server, scheduler } = createServer(loadConfig());
   scheduler?.start();

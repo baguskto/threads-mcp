@@ -8,6 +8,8 @@ export interface Config {
   scheduleFile?: string;
   /** Only register tools that never change anything on Threads. */
   readOnly?: boolean;
+  /** How long a publish call waits for media processing before returning the pending container. */
+  publishWaitSeconds?: number;
 }
 
 const truthy = (v?: string) => ['1', 'true', 'yes'].includes(v?.trim().toLowerCase() ?? '');
@@ -22,6 +24,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     host = match[1];
     apiVersion ??= match[2];
   }
+  if (host) assertSafeBaseUrl(host);
   return {
     accessToken: env.THREADS_ACCESS_TOKEN?.trim() || undefined,
     userId: env.THREADS_USER_ID?.trim() || undefined,
@@ -30,5 +33,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     appSecret: env.THREADS_APP_SECRET?.trim() || undefined,
     scheduleFile: env.THREADS_SCHEDULE_FILE?.trim() || undefined,
     readOnly: truthy(env.THREADS_READ_ONLY),
+    publishWaitSeconds: Number(env.THREADS_PUBLISH_WAIT_SECONDS) || undefined,
   };
+}
+
+/** The access token is sent to this host, so only allow HTTPS (or plain HTTP to localhost for testing). */
+function assertSafeBaseUrl(value: string) {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`THREADS_API_BASE_URL is not a valid URL: ${value}`);
+  }
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) {
+    throw new Error('THREADS_API_BASE_URL must use https:// (http:// is only allowed for localhost)');
+  }
 }

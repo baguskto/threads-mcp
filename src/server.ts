@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { McpServer } from '@modelcontextprotocol/server';
+import { McpServer, type ServerContext } from '@modelcontextprotocol/server';
 import type { Config } from './config.js';
 import { defaultScheduleFile, Scheduler } from './scheduler.js';
 import { ThreadsClient } from './threads/client.js';
@@ -16,10 +16,18 @@ export const VERSION: string = createRequire(import.meta.url)('../package.json')
 export interface ToolContext {
   /** Returns the API client, or throws a setup error when no token is configured. */
   client(): ThreadsClient;
+  /** A client for public endpoints that works without a token. */
+  publicClient(): ThreadsClient;
   config: Config;
   scheduler?: Scheduler<ScheduledPayload>;
+  /** Base publish options (tests use these to speed up polling). */
   publish: PublishOptions;
+  /** Publish options for a tool call: honours cancellation, reports progress, and caps the wait. */
+  publishOptions(req: ServerContext): PublishOptions;
 }
+
+/** Default in-call wait for media processing; most MCP clients time requests out at about 60 seconds. */
+export const DEFAULT_PUBLISH_WAIT_SECONDS = 45;
 
 export interface CreateServerOptions {
   /** Inject a client (tests). */
@@ -59,6 +67,14 @@ export function createServer(config: Config, options: CreateServerOptions = {}) 
   }
 
   let client = options.client;
+  const newClient = (accessToken?: string) =>
+    new ThreadsClient({
+      accessToken,
+      userId: config.userId,
+      baseUrl: config.baseUrl,
+      apiVersion: config.apiVersion,
+      fetch: options.fetch,
+    });
   const getClient = () => {
     if (!client) {
       if (!config.accessToken) {
@@ -67,18 +83,42 @@ export function createServer(config: Config, options: CreateServerOptions = {}) 
             'See https://developers.facebook.com/docs/threads/get-started for how to get a token.',
         );
       }
-      client = new ThreadsClient({
-        accessToken: config.accessToken,
-        userId: config.userId,
-        baseUrl: config.baseUrl,
-        apiVersion: config.apiVersion,
-        fetch: options.fetch,
-      });
+      client = newClient(config.accessToken);
     }
     return client;
   };
+  const getPublicClient = () => client ?? (config.accessToken ? getClient() : newClient());
 
-  const ctx: ToolContext = { client: getClient, config, publish: options.publish ?? {} };
+  const basePublish = options.publish ?? {};
+  const ctx: ToolContext = {
+    client: getClient,
+    publicClient: getPublicClient,
+    config,
+    publish: basePublish,
+    publishOptions: (req) => {
+      const progressToken = req.mcpReq._meta?.progressToken;
+      return {
+        ...basePublish,
+        timeoutMs: basePublish.timeoutMs ?? (config.publishWaitSeconds ?? DEFAULT_PUBLISH_WAIT_SECONDS) * 1000,
+        signal: req.mcpReq.signal,
+        onProgress:
+          progressToken === undefined
+            ? undefined
+            : ({ containerId, elapsedMs }) => {
+                req.mcpReq
+                  .notify({
+                    method: 'notifications/progress',
+                    params: {
+                      progressToken,
+                      progress: Math.round(elapsedMs / 1000),
+                      message: `Waiting for media container ${containerId} to finish processing`,
+                    },
+                  })
+                  .catch(() => {});
+              },
+      };
+    },
+  };
   if (options.scheduler !== false && !config.readOnly) {
     ctx.scheduler = new Scheduler<ScheduledPayload>(config.scheduleFile ?? defaultScheduleFile(), (payload) =>
       publishScheduled(ctx, payload),

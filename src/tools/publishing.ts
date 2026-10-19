@@ -2,7 +2,14 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { ToolContext } from '../server.js';
 import type { Params } from '../threads/client.js';
-import { createAndPublish, createContainer, publishContainer, waitForContainer } from '../threads/publish.js';
+import {
+  ContainerPendingError,
+  createAndPublish,
+  createContainer,
+  publishContainer,
+  waitForContainer,
+  type PublishOptions,
+} from '../threads/publish.js';
 import {
   buildPostOptions,
   buildSinglePostParams,
@@ -10,11 +17,17 @@ import {
   MAX_TEXT_LENGTH,
   mediaShape,
   postOptionsShape,
+  spoilerEntities,
+  spoilersSchema,
   textExtrasShape,
+  threadsId,
 } from './post-options.js';
 import { handler } from './util.js';
 
 export const MAX_CAROUSEL_ITEMS = 20;
+
+/** Scheduled posts have no client waiting on them, so they can wait the full 5 minutes Meta suggests. */
+const SCHEDULED_WAIT_MS = 300_000;
 
 const text = z.string().max(MAX_TEXT_LENGTH).describe(`Post text (max ${MAX_TEXT_LENGTH} characters; up to 5 links)`);
 
@@ -44,14 +57,31 @@ const carouselShape = {
   items: z.array(carouselItem).min(2).max(MAX_CAROUSEL_ITEMS).describe(`2–${MAX_CAROUSEL_ITEMS} images/videos`),
   text: text.optional(),
   is_spoiler_media: z.boolean().optional(),
+  spoilers: spoilersSchema.optional(),
   ...postOptionsShape,
 };
 const carouselSchema = z.object(carouselShape);
 type CarouselInput = z.infer<typeof carouselSchema>;
 
+/** Fields that only make sense on a single post, rejected when scheduling a carousel. */
+const SINGLE_POST_ONLY = [
+  'image_url',
+  'video_url',
+  'alt_text',
+  'media_type',
+  'media_url',
+  'link_attachment',
+  'poll_options',
+  'gif_id',
+  'text_attachment',
+  'is_ghost_post',
+] as const;
+
+type Target = { reply_to_id?: string; quote_post_id?: string };
+
 export type ScheduledPayload =
-  | { kind: 'post'; input: SinglePostInput & { reply_to_id?: string; quote_post_id?: string } }
-  | { kind: 'carousel'; input: CarouselInput };
+  | { kind: 'post'; input: SinglePostInput & Target }
+  | { kind: 'carousel'; input: CarouselInput & Target };
 
 function normalizeLegacyMedia(input: SinglePostInput): SinglePostInput {
   const { media_type, media_url, ...rest } = input;
@@ -60,7 +90,7 @@ function normalizeLegacyMedia(input: SinglePostInput): SinglePostInput {
   return isVideo ? { ...rest, video_url: media_url } : { ...rest, image_url: media_url };
 }
 
-function singlePostParams(input: SinglePostInput, extra: { reply_to_id?: string; quote_post_id?: string } = {}): Params {
+function singlePostParams(input: SinglePostInput, extra: Target = {}): Params {
   return { ...buildSinglePostParams({ ...normalizeLegacyMedia(input), reply_to_id: extra.reply_to_id }), ...extra };
 }
 
@@ -71,23 +101,44 @@ const stageShape = {
     .describe('Set false to only create the container (a draft); publish it later with publish_container within 24 hours'),
 };
 
-/** Publishes now, or stops after creating the container when `publish` is false. */
-async function publishOrStage(ctx: ToolContext, params: Params, publish: boolean) {
+const pendingResult = (containerId: string) => ({
+  container_id: containerId,
+  published: false,
+  status: 'IN_PROGRESS',
+  note: 'Media is still processing. Call publish_container with this container_id in a minute or two (it expires after 24 hours).',
+});
+
+/**
+ * Publishes now, or stops after creating the container when `publish` is false.
+ * Media that is still processing when the wait budget runs out is returned as
+ * a pending container instead of an error, so it can be finished later.
+ */
+async function publishOrStage(ctx: ToolContext, params: Params, publish: boolean, options: PublishOptions) {
   const client = ctx.client();
-  if (publish) return createAndPublish(client, params, ctx.publish);
   const containerId = await createContainer(client, params);
-  return {
-    container_id: containerId,
-    published: false,
-    note: 'Container created but not published. Publish it with publish_container within 24 hours.',
-  };
+  if (!publish) {
+    return {
+      container_id: containerId,
+      published: false,
+      note: 'Container created but not published. Publish it with publish_container within 24 hours.',
+    };
+  }
+  try {
+    return await publishContainer(client, containerId, options);
+  } catch (error) {
+    if (error instanceof ContainerPendingError) return pendingResult(containerId);
+    throw error;
+  }
 }
 
-async function publishCarousel(ctx: ToolContext, input: CarouselInput, publish = true) {
+async function publishCarousel(
+  ctx: ToolContext,
+  input: CarouselInput & Target,
+  { publish = true, options }: { publish?: boolean; options: PublishOptions },
+) {
   checkText(input.text);
   const client = ctx.client();
-  // Item containers are processed in parallel by Threads; create them in order
-  // so the carousel keeps the requested sequence.
+  // Create item containers in order so the carousel keeps the requested sequence.
   const children: string[] = [];
   for (const item of input.items) {
     const isVideo = item.type === 'VIDEO' || (!item.type && /\.(mp4|mov|m4v)(\?|$)/i.test(item.url));
@@ -100,24 +151,44 @@ async function publishCarousel(ctx: ToolContext, input: CarouselInput, publish =
       }),
     );
   }
-  for (const id of children) await waitForContainer(client, id, ctx.publish);
+  try {
+    for (const id of children) await waitForContainer(client, id, options);
+  } catch (error) {
+    if (error instanceof ContainerPendingError) {
+      throw new Error(
+        `Carousel items are still processing (${error.containerId}); nothing was published. ` +
+          `Item containers: ${children.join(', ')}. Try again in a few minutes, or schedule the carousel instead.`,
+      );
+    }
+    throw error;
+  }
   const params = {
     media_type: 'CAROUSEL',
     children,
     text: input.text,
     is_spoiler_media: input.is_spoiler_media,
+    text_entities: spoilerEntities(input.spoilers),
+    reply_to_id: input.reply_to_id,
+    quote_post_id: input.quote_post_id,
     ...buildPostOptions(input),
   };
-  const result = await publishOrStage(ctx, params, publish);
+  const result = await publishOrStage(ctx, params, publish, options);
   return { ...result, media_count: children.length, item_container_ids: children };
 }
 
 /** Publishes a payload saved by schedule_post. */
 export async function publishScheduled(ctx: ToolContext, payload: ScheduledPayload) {
-  if (payload.kind === 'carousel') return publishCarousel(ctx, payload.input);
+  const options = { ...ctx.publish, timeoutMs: ctx.publish.timeoutMs ?? SCHEDULED_WAIT_MS };
+  if (payload.kind === 'carousel') return publishCarousel(ctx, payload.input, { options });
   const { reply_to_id, quote_post_id, ...input } = payload.input;
-  return createAndPublish(ctx.client(), singlePostParams(input, { reply_to_id, quote_post_id }), ctx.publish);
+  return createAndPublish(ctx.client(), singlePostParams(input, { reply_to_id, quote_post_id }), options);
 }
+
+/** Accepts only timestamps with an explicit offset, so the time doesn't depend on where the server runs. */
+const publishAt = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/, 'Use ISO 8601 with a timezone offset, e.g. 2026-11-01T09:00:00+07:00')
+  .describe('When to publish, ISO 8601 with timezone offset, e.g. 2026-11-01T09:00:00+07:00');
 
 const writeAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true };
 
@@ -132,7 +203,7 @@ export function registerPublishingTools(server: McpServer, ctx: ToolContext) {
       inputSchema: singlePostSchema.extend(stageShape),
       annotations: writeAnnotations,
     },
-    handler(async ({ publish, ...input }) => publishOrStage(ctx, singlePostParams(input), publish)),
+    handler(async ({ publish, ...input }, req) => publishOrStage(ctx, singlePostParams(input), publish, ctx.publishOptions(req))),
   );
 
   server.registerTool(
@@ -143,7 +214,7 @@ export function registerPublishingTools(server: McpServer, ctx: ToolContext) {
       inputSchema: carouselSchema.extend(stageShape),
       annotations: writeAnnotations,
     },
-    handler(async ({ publish, ...input }) => publishCarousel(ctx, input, publish)),
+    handler(async ({ publish, ...input }, req) => publishCarousel(ctx, input, { publish, options: ctx.publishOptions(req) })),
   );
 
   server.registerTool(
@@ -151,11 +222,11 @@ export function registerPublishingTools(server: McpServer, ctx: ToolContext) {
     {
       title: 'Reply to a post',
       description: 'Reply to any post or reply you can see. Supports the same media and options as publish_thread.',
-      inputSchema: z.object({ reply_to_id: z.string().describe('Media ID to reply to'), ...singlePostShape }),
+      inputSchema: z.object({ reply_to_id: threadsId.describe('Media ID to reply to'), ...singlePostShape }),
       annotations: writeAnnotations,
     },
-    handler(async ({ reply_to_id, ...input }) => {
-      const result = await createAndPublish(ctx.client(), singlePostParams(input, { reply_to_id }), ctx.publish);
+    handler(async ({ reply_to_id, ...input }, req) => {
+      const result = await publishOrStage(ctx, singlePostParams(input, { reply_to_id }), true, ctx.publishOptions(req));
       return { ...result, reply_to_id };
     }),
   );
@@ -165,11 +236,12 @@ export function registerPublishingTools(server: McpServer, ctx: ToolContext) {
     {
       title: 'Quote a post',
       description: 'Publish a post that quotes another post, with your own text and optional media.',
-      inputSchema: z.object({ quoted_post_id: z.string().describe('Media ID of the post to quote'), ...singlePostShape }),
+      inputSchema: z.object({ quoted_post_id: threadsId.describe('Media ID of the post to quote'), ...singlePostShape }),
       annotations: writeAnnotations,
     },
-    handler(async ({ quoted_post_id, ...input }) => {
-      const result = await createAndPublish(ctx.client(), singlePostParams(input, { quote_post_id: quoted_post_id }), ctx.publish);
+    handler(async ({ quoted_post_id, ...input }, req) => {
+      const params = singlePostParams(input, { quote_post_id: quoted_post_id });
+      const result = await publishOrStage(ctx, params, true, ctx.publishOptions(req));
       return { ...result, quoted_post_id };
     }),
   );
@@ -182,7 +254,7 @@ export function registerPublishingTools(server: McpServer, ctx: ToolContext) {
         'Publish a multi-part thread where each part replies to the previous one. Pass parent_thread_id to continue an existing ' +
         'post; otherwise the first part becomes a new post.',
       inputSchema: z.object({
-        parent_thread_id: z.string().optional().describe('Existing post to continue; omit to start a new thread'),
+        parent_thread_id: threadsId.optional().describe('Existing post to continue; omit to start a new thread'),
         replies: z
           .array(
             z.object({
@@ -200,8 +272,9 @@ export function registerPublishingTools(server: McpServer, ctx: ToolContext) {
       }),
       annotations: writeAnnotations,
     },
-    handler(async ({ parent_thread_id, replies, topic_tag }) => {
+    handler(async ({ parent_thread_id, replies, topic_tag }, req) => {
       const client = ctx.client();
+      const options = ctx.publishOptions(req);
       // Validate every part before anything goes live.
       const parts = replies.map((part, index) => {
         try {
@@ -215,15 +288,19 @@ export function registerPublishingTools(server: McpServer, ctx: ToolContext) {
       let replyTo = parent_thread_id;
       for (const [index, params] of parts.entries()) {
         try {
-          const result = await createAndPublish(client, { ...params, reply_to_id: replyTo }, ctx.publish);
+          const result = await createAndPublish(client, { ...params, reply_to_id: replyTo }, options);
           published.push({ position: index + 1, reply_to_id: replyTo, ...result });
           replyTo = result.id;
         } catch (error) {
           // Report what made it out so the chain can be resumed.
+          const done = published.map((p) => p.id);
           throw new Error(
-            `Part ${index + 1} of ${parts.length} failed: ${(error as Error).message}. ` +
-              `Published so far: ${JSON.stringify(published.map((p) => p.id))}. ` +
-              (replyTo ? `Resume with parent_thread_id=${replyTo} and the remaining parts.` : 'Nothing was published.'),
+            `Part ${index + 1} of ${parts.length} did not complete: ${(error as Error).message} ` +
+              `Published before it: ${done.length ? done.join(', ') : 'none'}. ` +
+              `If part ${index + 1} turns out to be published, continue from its ID; otherwise ` +
+              (replyTo
+                ? `resume with parent_thread_id=${replyTo} and parts ${index + 1}–${parts.length}.`
+                : 'retry the whole chain.'),
           );
         }
       }
@@ -236,7 +313,7 @@ export function registerPublishingTools(server: McpServer, ctx: ToolContext) {
     {
       title: 'Repost',
       description: 'Repost a post to your profile. The API has no documented way to undo a repost.',
-      inputSchema: z.object({ post_id: z.string().describe('Media ID to repost') }),
+      inputSchema: z.object({ post_id: threadsId.describe('Media ID to repost') }),
       annotations: writeAnnotations,
     },
     handler(async ({ post_id }) => {
@@ -250,7 +327,7 @@ export function registerPublishingTools(server: McpServer, ctx: ToolContext) {
     {
       title: 'Check media container status',
       description: 'Check whether a media container is still processing, ready (FINISHED), published, failed or expired.',
-      inputSchema: z.object({ container_id: z.string() }),
+      inputSchema: z.object({ container_id: threadsId }),
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     handler(async ({ container_id }) => ctx.client().get(`/${container_id}`, { fields: 'id,status,error_message' })),
@@ -261,10 +338,17 @@ export function registerPublishingTools(server: McpServer, ctx: ToolContext) {
     {
       title: 'Publish a media container',
       description: 'Publish a container created earlier (for example one that was still processing when a publish timed out).',
-      inputSchema: z.object({ container_id: z.string() }),
+      inputSchema: z.object({ container_id: threadsId }),
       annotations: writeAnnotations,
     },
-    handler(async ({ container_id }) => publishContainer(ctx.client(), container_id, ctx.publish)),
+    handler(async ({ container_id }, req) => {
+      try {
+        return await publishContainer(ctx.client(), container_id, ctx.publishOptions(req));
+      } catch (error) {
+        if (error instanceof ContainerPendingError) return pendingResult(container_id);
+        throw error;
+      }
+    }),
   );
 
   registerSchedulingTools(server, ctx);
@@ -282,11 +366,13 @@ function registerSchedulingTools(server: McpServer, ctx: ToolContext) {
         'Schedule a post or carousel for later. Threads has no native scheduling, so the post is saved locally and published by ' +
         'this MCP server — it must be running at (or after) publish_at; overdue posts go out as soon as it starts.',
       inputSchema: z.object({
-        publish_at: z.string().describe('When to publish, ISO 8601 with timezone offset, e.g. 2026-11-01T09:00:00+07:00'),
+        publish_at: publishAt,
         ...singlePostShape,
-        reply_to_id: z.string().optional().describe('Publish as a reply to this media ID'),
-        quote_post_id: z.string().optional().describe('Publish as a quote of this media ID'),
-        carousel_items: carouselShape.items.optional().describe('Schedule a carousel instead of a single post'),
+        reply_to_id: threadsId.optional().describe('Publish as a reply to this media ID'),
+        quote_post_id: threadsId.optional().describe('Publish as a quote of this media ID'),
+        carousel_items: carouselShape.items
+          .optional()
+          .describe('Schedule a carousel instead of a single post (text, spoilers and post options still apply)'),
       }),
       annotations: writeAnnotations,
     },
@@ -294,8 +380,12 @@ function registerSchedulingTools(server: McpServer, ctx: ToolContext) {
       let payload: ScheduledPayload;
       // Validate now so mistakes surface immediately rather than at publish time.
       if (carousel_items) {
-        payload = { kind: 'carousel', input: carouselSchema.parse({ ...input, items: carousel_items }) };
-        checkText(payload.input.text);
+        const invalid = SINGLE_POST_ONLY.filter((key) => input[key] !== undefined);
+        if (invalid.length) throw new Error(`${invalid.join(', ')} cannot be used with carousel_items`);
+        const { reply_to_id, quote_post_id } = input;
+        const carousel = carouselSchema.parse({ ...input, items: carousel_items });
+        checkText(carousel.text);
+        payload = { kind: 'carousel', input: { ...carousel, reply_to_id, quote_post_id } };
       } else {
         const { reply_to_id, quote_post_id, ...post } = input;
         singlePostParams(post, { reply_to_id, quote_post_id });

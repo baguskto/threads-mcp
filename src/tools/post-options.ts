@@ -4,6 +4,14 @@ import type { Params } from '../threads/client.js';
 export const MAX_TEXT_LENGTH = 500;
 export const MAX_LINKS = 5;
 
+/** Threads media, user, container and location IDs are numeric strings. */
+export const threadsId = z.string().regex(/^\d+$/, 'Must be a numeric Threads ID');
+
+export const spoilersSchema = z
+  .array(z.object({ offset: z.number().int().min(0), length: z.number().int().min(1) }))
+  .max(10)
+  .describe('Ranges of the text to hide as spoilers (character offset and length)');
+
 export const replyControl = z
   .enum(['everyone', 'accounts_you_follow', 'mentioned_only', 'parent_post_author_only', 'followers_only'])
   .describe('Who can reply to the post');
@@ -18,7 +26,7 @@ export const postOptionsShape = {
     .regex(/^[^.&]+$/, 'Topic tags cannot contain periods or ampersands')
     .optional()
     .describe('One topic tag for the post (how Threads groups posts by topic; inline #hashtags are not needed)'),
-  location_id: z.string().optional().describe('Location ID from search_locations (needs threads_location_tagging)'),
+  location_id: threadsId.optional().describe('Location ID from search_locations (needs threads_location_tagging)'),
   allowlisted_country_codes: z
     .array(z.string().length(2))
     .optional()
@@ -30,7 +38,7 @@ export const postOptionsShape = {
     .describe('Also share the post to your linked Instagram Story (needs threads_share_to_instagram)'),
 } as const;
 
-/** Text-only extras: link previews, polls, GIFs, spoilers, long text and ghost posts. */
+/** Text-only extras (link previews, polls, GIFs, long text, ghost posts) plus spoilers, which work on any post. */
 export const textExtrasShape = {
   link_attachment: z.url().optional().describe('URL to show as a link preview card (text posts only)'),
   poll_options: z
@@ -40,11 +48,7 @@ export const textExtrasShape = {
     .optional()
     .describe('Attach a 24-hour poll with 2–4 options of up to 25 characters (text posts only)'),
   gif_id: z.string().optional().describe('GIPHY GIF ID to attach (text posts only; GIPHY is the only supported provider)'),
-  spoilers: z
-    .array(z.object({ offset: z.number().int().min(0), length: z.number().int().min(1) }))
-    .max(10)
-    .optional()
-    .describe('Ranges of the text to hide as spoilers (character offset and length)'),
+  spoilers: spoilersSchema.optional(),
   text_attachment: z
     .object({
       plaintext: z.string().min(1).max(10_000),
@@ -111,6 +115,12 @@ export function buildPostOptions(o: PostOptions): Params {
   };
 }
 
+/** Spoiler ranges as the `text_entities` param; valid on text, media and carousel posts. */
+export function spoilerEntities(spoilers?: { offset: number; length: number }[]): string | undefined {
+  if (!spoilers?.length) return undefined;
+  return JSON.stringify(spoilers.map((s) => ({ entity_type: 'SPOILER', offset: s.offset, length: s.length })));
+}
+
 export function buildTextExtras(o: TextExtras): Params {
   const params: Params = {
     link_attachment: o.link_attachment,
@@ -121,9 +131,6 @@ export function buildTextExtras(o: TextExtras): Params {
     params.poll_attachment = Object.fromEntries(o.poll_options.map((text, i) => [keys[i], text]));
   }
   if (o.gif_id) params.gif_attachment = { gif_id: o.gif_id, provider: 'GIPHY' };
-  if (o.spoilers?.length) {
-    params.text_entities = JSON.stringify(o.spoilers.map((s) => ({ entity_type: 'SPOILER', ...s })));
-  }
   if (o.text_attachment) {
     const { plaintext, link_attachment_url, styling } = o.text_attachment;
     params.text_attachment = {
@@ -135,21 +142,33 @@ export function buildTextExtras(o: TextExtras): Params {
   return params;
 }
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+const EMOJI_LIKE = /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3/u;
+
 /**
- * Length as Threads counts it: emoji count as their UTF-8 byte length,
- * everything else as one character.
+ * Length as Threads counts it: an emoji (including flags, keycaps, skin tones
+ * and ZWJ sequences) counts as its full UTF-8 byte length, anything else as one.
  */
 export function threadsTextLength(text: string): number {
   let length = 0;
-  for (const char of text) {
-    length += /\p{Extended_Pictographic}/u.test(char) ? Buffer.byteLength(char, 'utf8') : 1;
+  for (const { segment } of graphemes.segment(text)) {
+    length += EMOJI_LIKE.test(segment) ? Buffer.byteLength(segment, 'utf8') : 1;
   }
   return length;
 }
 
+const normalizeLink = (url: string) =>
+  url
+    .replace(/[).,!?'"]+$/, '')
+    .replace(/^https?:\/\//i, '')
+    .replace(/^www\./i, '')
+    .replace(/\/+$/, '')
+    .toLowerCase();
+
+/** Unique links as Threads counts them, including scheme-less `www.` links. */
 export function countLinks(text = '', linkAttachment?: string): number {
-  const urls = new Set((text.match(/https?:\/\/[^\s]+/gi) ?? []).map((u) => u.replace(/[).,!?]+$/, '')));
-  if (linkAttachment) urls.add(linkAttachment);
+  const urls = new Set((text.match(/(?:https?:\/\/|www\.)[^\s]+/gi) ?? []).map(normalizeLink));
+  if (linkAttachment) urls.add(normalizeLink(linkAttachment));
   return urls.size;
 }
 
@@ -204,6 +223,7 @@ export function buildSinglePostParams(
     video_url,
     alt_text: mediaType === 'TEXT' ? undefined : input.alt_text,
     is_spoiler_media: mediaType === 'TEXT' ? undefined : input.is_spoiler_media,
+    text_entities: spoilerEntities(input.spoilers),
     ...buildPostOptions(input),
     ...(mediaType === 'TEXT' ? buildTextExtras(input) : {}),
   };

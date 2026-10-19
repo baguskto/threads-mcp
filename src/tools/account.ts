@@ -46,19 +46,27 @@ export function registerAccountTools(server: McpServer, ctx: ToolContext) {
     handler(async () => {
       const client = ctx.client();
       const userId = await client.getUserId();
-      const res = await client.get<{ data: unknown[] }>(`/${userId}/threads_publishing_limit`, {
-        fields: [
-          'quota_usage',
-          'config',
-          'reply_quota_usage',
-          'reply_config',
-          'delete_quota_usage',
-          'delete_config',
-          'location_search_quota_usage',
-          'location_search_config',
-        ],
+      const path = `/${userId}/threads_publishing_limit`;
+      const res = await client.get<{ data?: Record<string, unknown>[] }>(path, {
+        fields: ['quota_usage', 'config', 'reply_quota_usage', 'reply_config'],
       });
-      return res.data?.[0] ?? res;
+      const limits: Record<string, unknown> = { ...(res.data?.[0] ?? {}) };
+      // These pairs need threads_delete / threads_location_tagging; asking for them
+      // without the scope fails the whole request, so fetch them separately.
+      const optional = [
+        { scope: 'threads_delete', fields: ['delete_quota_usage', 'delete_config'] },
+        { scope: 'threads_location_tagging', fields: ['location_search_quota_usage', 'location_search_config'] },
+      ];
+      const unavailable: string[] = [];
+      for (const { scope, fields } of optional) {
+        try {
+          const extra = await client.get<{ data?: Record<string, unknown>[] }>(path, { fields }, { retries: 0 });
+          Object.assign(limits, extra.data?.[0]);
+        } catch {
+          unavailable.push(`${fields.join(', ')} (needs ${scope})`);
+        }
+      }
+      return unavailable.length ? { ...limits, unavailable } : limits;
     }),
   );
 

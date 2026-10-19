@@ -1,6 +1,6 @@
 # Panduan Instalasi Threads MCP Server (v6)
 
-Server ini menghubungkan Claude (Claude Code, Claude Desktop, atau klien MCP lain) ke **Threads API resmi dari Meta**. Butuh Node.js 20.12 atau lebih baru.
+Server ini menghubungkan Claude (Claude Code, Claude Desktop, atau klien MCP lain) ke **Threads API resmi dari Meta**. Butuh Node.js 20 atau lebih baru.
 
 ## 1. Siapkan access token
 
@@ -51,7 +51,10 @@ claude mcp add threads --env THREADS_ACCESS_TOKEN=TOKEN_ANDA -- node /path/ke/th
 | `THREADS_USER_ID` | tidak | ID user Threads (menghemat satu panggilan `/me`) |
 | `THREADS_APP_SECRET` | tidak | Untuk `exchange_for_long_lived_token` |
 | `THREADS_READ_ONLY` | tidak | `true` = hanya tool baca (tidak bisa posting, hapus, atau menjadwalkan) |
+| `THREADS_PUBLISH_WAIT_SECONDS` | tidak | Lama menunggu proses video/gambar sebelum container dikembalikan untuk dipublikasikan nanti (default 45 detik) |
 | `THREADS_SCHEDULE_FILE` | tidak | Lokasi file post terjadwal (default `~/.threads-mcp/scheduled-posts.json`) |
+
+Server **tidak** membaca file `.env` di folder kerja (demi keamanan, karena klien bisa menjalankan server di dalam proyek yang belum tentu tepercaya). Isi variabel lewat blok `env` di konfigurasi MCP.
 
 ## 4. Verifikasi
 
@@ -88,6 +91,7 @@ Threads API **tidak punya fitur jadwal bawaan**. `schedule_post` menyimpan post 
 | Error 190 / token invalid | Token kedaluwarsa. Buat token baru, atau jalankan `refresh_access_token` sebelum lewat 60 hari |
 | Permission denied | Scope belum diberikan. Jalankan `validate_setup` untuk melihat yang kurang |
 | Video gagal dipublikasikan | URL harus publik (HTTPS), MP4/MOV, maks. 5 menit / 1 GB. Cek dengan `get_container_status` |
+| Hasil `published: false, status: IN_PROGRESS` | Video masih diproses. Tunggu sebentar lalu jalankan `publish_container` dengan `container_id` tersebut |
 | Pencarian hanya menampilkan post sendiri | `threads_keyword_search` belum disetujui Meta (advanced access) |
 
 ## 8. Update

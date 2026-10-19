@@ -44,7 +44,7 @@ claude mcp add threads --env THREADS_ACCESS_TOKEN=your_token -- npx -y threads-m
 }
 ```
 
-Requires Node.js 20.12 or newer.
+Requires Node.js 20 or newer.
 
 ### 3. Check the setup
 
@@ -58,11 +58,12 @@ Ask the assistant to run `validate_setup`. It confirms the token works, shows wh
 | `THREADS_USER_ID` | no | Your Threads user ID; skips one `/me` lookup |
 | `THREADS_APP_SECRET` | no | Enables `exchange_for_long_lived_token` |
 | `THREADS_READ_ONLY` | no | `true` to expose only read tools (no publishing, deleting or scheduling) |
+| `THREADS_PUBLISH_WAIT_SECONDS` | no | How long a publish call waits for media processing before returning the pending container (default 45) |
 | `THREADS_SCHEDULE_FILE` | no | Where scheduled posts are stored (default `~/.threads-mcp/scheduled-posts.json`) |
 | `THREADS_API_VERSION` | no | Graph API version (default `v1.0`) |
-| `THREADS_API_BASE_URL` | no | Graph host (default `https://graph.threads.net`) |
+| `THREADS_API_BASE_URL` | no | Graph host (default `https://graph.threads.net`; must be HTTPS) |
 
-A `.env` file in the working directory is loaded too.
+Configuration is read only from the environment your MCP client passes in. A `.env` file in the working directory is intentionally ignored, because clients often launch servers inside projects you may not trust.
 
 ## Tools
 
@@ -80,7 +81,7 @@ A `.env` file in the working directory is loaded too.
 
 | Tool | What it does |
 | --- | --- |
-| `publish_thread` | Text, image or video post. Text posts can add a link preview, a poll (2–4 options), a GIPHY GIF, spoiler ranges, a long-form text attachment (up to 10,000 characters) or be a 24-hour ghost post. Every post can set a topic tag, reply control, location, country allowlist, reply approvals and Instagram Story cross-sharing. `publish: false` creates a draft container instead. |
+| `publish_thread` | Text, image or video post. Text posts can add a link preview, a poll (2–4 options), a GIPHY GIF, a long-form text attachment (up to 10,000 characters) or be a 24-hour ghost post. Every post can set spoiler ranges, a topic tag, reply control, location, country allowlist, reply approvals and Instagram Story cross-sharing. `publish: false` creates a draft container instead. |
 | `create_carousel_post` | 2–20 images and/or videos with alt text |
 | `create_reply` | Reply to a post, with the same options as `publish_thread` |
 | `quote_post` | Quote another post |
@@ -88,6 +89,8 @@ A `.env` file in the working directory is loaded too.
 | `repost_thread` | Repost a post |
 | `delete_thread` | Delete one of your posts |
 | `get_container_status` / `publish_container` | Inspect and publish a container later (drafts, or slow videos) |
+
+Video and image processing can take a while. A publish call waits up to 45 seconds (so it finishes before typical MCP client timeouts) and sends progress notifications while it waits; if the media is still processing after that, it returns the pending `container_id` instead of failing, and `publish_container` finishes the job. Cancelling a request stops it before anything is published.
 
 ### Scheduling
 

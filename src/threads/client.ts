@@ -22,10 +22,16 @@ export interface RequestOptions {
   versioned?: boolean;
   /** Set to false to omit the access token (oEmbed is public). */
   auth?: boolean;
+  /** Override the retry count for this request. */
+  retries?: number;
 }
 
+/** Relative API paths are node IDs and edge names only; this blocks `..`, `?`, `#` and encoded tricks. */
+const SAFE_PATH = /^\/[A-Za-z0-9_]+(\/[A-Za-z0-9_]+)*$/;
+
 export interface ThreadsClientOptions {
-  accessToken: string;
+  /** Optional so public endpoints (oEmbed) work without one; authenticated calls throw without it. */
+  accessToken?: string;
   /** Override the Graph host, e.g. for a proxy. Defaults to https://graph.threads.net. */
   baseUrl?: string;
   apiVersion?: string;
@@ -46,7 +52,7 @@ const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
  * POST is never retried so a publish can't be duplicated.
  */
 export class ThreadsClient {
-  private accessToken: string;
+  private accessToken?: string;
   private readonly base: string;
   private readonly root: string;
   private readonly timeoutMs: number;
@@ -56,7 +62,6 @@ export class ThreadsClient {
   private userId?: string;
 
   constructor(options: ThreadsClientOptions) {
-    if (!options.accessToken) throw new Error('A Threads access token is required');
     this.accessToken = options.accessToken;
     this.base = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
     const version = options.apiVersion ?? DEFAULT_API_VERSION;
@@ -68,7 +73,7 @@ export class ThreadsClient {
     this.sleep = options.sleep ?? defaultSleep;
   }
 
-  get token(): string {
+  get token(): string | undefined {
     return this.accessToken;
   }
 
@@ -114,8 +119,15 @@ export class ThreadsClient {
   }
 
   private buildUrl(path: string, versioned = true): URL {
-    if (/^https?:\/\//.test(path)) return new URL(path);
-    return new URL(`${versioned ? this.root : this.base}${path.startsWith('/') ? path : `/${path}`}`);
+    if (/^https?:\/\//.test(path)) {
+      // Only follow pagination links that point back at the configured API host.
+      const url = new URL(path);
+      if (url.origin !== new URL(this.base).origin) throw new Error(`Refusing to follow a link to ${url.origin}`);
+      return url;
+    }
+    const normalized = path.startsWith('/') ? path : `/${path}`;
+    if (!SAFE_PATH.test(normalized)) throw new Error(`Invalid API path: ${path}`);
+    return new URL(`${versioned ? this.root : this.base}${normalized}`);
   }
 
   private async request<T>(
@@ -125,6 +137,9 @@ export class ThreadsClient {
     options: RequestOptions = {},
   ): Promise<T> {
     const url = this.buildUrl(path, options.versioned);
+    if (options.auth !== false && !this.accessToken) {
+      throw new Error('THREADS_ACCESS_TOKEN is not set. Add it to the env block of this MCP server in your client config.');
+    }
     const encoded = encodeParams(options.auth === false ? params : { ...params, access_token: this.accessToken });
     let body: URLSearchParams | undefined;
     if (method === 'POST') {
@@ -133,7 +148,7 @@ export class ThreadsClient {
       for (const [key, value] of encoded) url.searchParams.set(key, value);
     }
 
-    const attempts = method === 'POST' ? 1 : this.maxRetries + 1;
+    const attempts = method === 'POST' ? 1 : (options.retries ?? this.maxRetries) + 1;
     for (let attempt = 1; ; attempt++) {
       try {
         return await this.send<T>(method, url, body);

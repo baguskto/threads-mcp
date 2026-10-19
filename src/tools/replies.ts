@@ -2,10 +2,11 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { ToolContext } from '../server.js';
 import { REPLY_FIELDS } from '../threads/fields.js';
+import { threadsId } from './post-options.js';
 import { fieldsParam, handler, toUnixSeconds } from './util.js';
 
 const repliesShape = {
-  thread_id: z.string().describe('Media ID of the post'),
+  thread_id: threadsId.describe('Media ID of the post'),
   fields: z.array(z.string()).optional().describe(`Fields to return. Default: ${REPLY_FIELDS.join(', ')}`),
   oldest_first: z.boolean().default(false).describe('Return oldest replies first (default: newest first)'),
   limit: z.number().int().min(1).max(500).default(50),
@@ -85,7 +86,7 @@ export function registerReplyTools(server: McpServer, ctx: ToolContext) {
       description:
         'Hide or unhide a top-level reply on one of your posts; hiding also hides the replies under it (needs threads_manage_replies).',
       inputSchema: z.object({
-        reply_id: z.string(),
+        reply_id: threadsId,
         hide: z.boolean().describe('true to hide, false to unhide'),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -102,7 +103,7 @@ export function registerReplyTools(server: McpServer, ctx: ToolContext) {
       title: 'List replies awaiting approval',
       description: 'List pending replies on a post that was published with enable_reply_approvals.',
       inputSchema: z.object({
-        thread_id: z.string(),
+        thread_id: threadsId,
         approval_status: z.enum(['pending', 'ignored']).default('pending'),
         fields: z.array(z.string()).optional(),
         oldest_first: z.boolean().default(false),
@@ -131,7 +132,7 @@ export function registerReplyTools(server: McpServer, ctx: ToolContext) {
       title: 'Approve or ignore a pending reply',
       description: 'Approve (publish) or ignore a reply that is waiting for approval. Ignored replies can still be approved later.',
       inputSchema: z.object({
-        reply_id: z.string(),
+        reply_id: threadsId,
         approve: z.boolean().describe('true to approve, false to ignore'),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },

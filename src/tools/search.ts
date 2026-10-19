@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { ToolContext } from '../server.js';
 import type { Page } from '../threads/client.js';
 import { MEDIA_FIELDS } from '../threads/fields.js';
+import { threadsId } from './post-options.js';
 import { fieldsParam, handler, toUnixSeconds } from './util.js';
 
 export function registerSearchTools(server: McpServer, ctx: ToolContext) {
@@ -85,7 +86,7 @@ export function registerSearchTools(server: McpServer, ctx: ToolContext) {
     {
       title: 'Get a location',
       description: 'Get details for a location ID (needs threads_location_tagging).',
-      inputSchema: z.object({ location_id: z.string() }),
+      inputSchema: z.object({ location_id: threadsId }),
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     handler(async ({ location_id }) =>
