@@ -1,3 +1,5 @@
+> **Usang (v1.1).** Dokumen ini menjelaskan fitur lama yang sudah tidak ada. Untuk versi saat ini lihat [README](README.md), [CHANGELOG](CHANGELOG.md) dan [LIMITASI_DAN_SOLUSI.md](LIMITASI_DAN_SOLUSI.md).
+
 # 🚀 Fitur Baru - Threads MCP Server v1.1
 
 ## ✅ Masalah yang Sudah Dipecahkan

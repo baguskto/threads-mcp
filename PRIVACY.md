@@ -2,8 +2,8 @@
 **Threads Personal Manager - MCP Server**
 
 **Effective Date:** December 2024  
-**Last Updated:** December 2024  
-**Version:** 2.0.0
+**Last Updated:** October 2026  
+**Version:** 2.1.0
 
 ## 1. Introduction
 
@@ -57,6 +57,8 @@ Through Meta's Threads API, the Service may access:
 - API responses are returned to you and not retained
 - Authentication tokens are handled locally by your system
 - No personal information is logged or saved
+
+**Exception — scheduled posts:** if you use `schedule_post`, the content of the scheduled post (text, media URLs and options) is saved in a file on your own device (by default `~/.threads-mcp/scheduled-posts.json`, readable only by your user) so it can be published later. It is sent only to the Threads API, at publish time. Cancelled and published entries stay in that file until you delete it.
 
 ### 3.3 No Third-Party Sharing
 - Your data is **never shared** with third parties

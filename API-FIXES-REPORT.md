@@ -1,3 +1,5 @@
+> **Superseded.** This report describes v5.0.0. Several of the "fixes" below relied on endpoints the Threads API does not have and were removed in v6. See [CHANGELOG.md](CHANGELOG.md) for the current state.
+
 # 🔧 API Fixes Report - Version 5.0.0
 
 ## 🎯 **PROBLEM SOLVED: All Major API Issues Fixed!**

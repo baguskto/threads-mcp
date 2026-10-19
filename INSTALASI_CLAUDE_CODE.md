@@ -1,157 +1,99 @@
-# 📱 Panduan Instalasi Threads MCP Server di Claude Code
+# Panduan Instalasi Threads MCP Server (v6)
 
-## 🚀 Metode 1: Install dari NPM (Paling Mudah)
+Server ini menghubungkan Claude (Claude Code, Claude Desktop, atau klien MCP lain) ke **Threads API resmi dari Meta**. Butuh Node.js 20.12 atau lebih baru.
 
-### 1. Install package global
+## 1. Siapkan access token
+
+1. Buat aplikasi di [developers.facebook.com/apps](https://developers.facebook.com/apps) lalu tambahkan use case **Threads API**.
+2. Tambahkan akun Threads Anda sebagai *tester*, lalu terima undangannya di aplikasi Threads (Settings → Account → Website permissions).
+3. Minta scope yang dibutuhkan. Untuk posting cukup `threads_basic` dan `threads_content_publish`; daftar lengkap ada di [README](README.md#permissions).
+4. Buat user token, lalu tukar menjadi **long-lived token** (berlaku 60 hari). Bisa juga dari server ini dengan tool `exchange_for_long_lived_token` jika `THREADS_APP_SECRET` diisi.
+
+Akun Threads tidak lagi wajib terhubung ke Instagram, kecuali untuk jumlah follower dan demografi.
+
+## 2. Tambahkan ke Claude Code
+
 ```bash
-npm install -g threads-mcp-server
+claude mcp add threads --env THREADS_ACCESS_TOKEN=TOKEN_ANDA -- npx -y threads-mcp-server
 ```
 
-### 2. Tambahkan ke konfigurasi Claude Code
-Edit file konfigurasi Claude Code di `~/.config/claude-code/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "threads": {
-      "command": "threads-mcp-server",
-      "env": {
-        "THREADS_ACCESS_TOKEN": "YOUR_TOKEN_HERE"
-      }
-    }
-  }
-}
-```
-
-## 🛠 Metode 2: Install Lokal dari Source
-
-### 1. Clone repository
-```bash
-git clone https://github.com/baguskto/threads-mcp.git
-cd threads-mcp
-```
-
-### 2. Install dependencies dan build
-```bash
-npm install
-npm run build
-```
-
-### 3. Tambahkan ke konfigurasi Claude Code
-```json
-{
-  "mcpServers": {
-    "threads": {
-      "command": "node",
-      "args": ["/path/ke/threads-mcp/dist/index.js"],
-      "env": {
-        "THREADS_ACCESS_TOKEN": "YOUR_TOKEN_HERE"
-      }
-    }
-  }
-}
-```
-
-## 🔧 Metode 3: Install via npx (Tidak perlu install global)
+### Atau lewat file konfigurasi (Claude Desktop dan klien lain)
 
 ```json
 {
   "mcpServers": {
     "threads": {
       "command": "npx",
-      "args": ["threads-mcp-server"],
+      "args": ["-y", "threads-mcp-server"],
       "env": {
-        "THREADS_ACCESS_TOKEN": "YOUR_TOKEN_HERE"
+        "THREADS_ACCESS_TOKEN": "TOKEN_ANDA"
       }
     }
   }
 }
 ```
 
-## 🔑 Mendapatkan Access Token
+### Dari source
 
-1. Pergi ke [Meta for Developers](https://developers.facebook.com/)
-2. Buat aplikasi baru atau gunakan yang sudah ada
-3. Tambahkan produk "Threads API"
-4. Generate access token dengan permissions yang diperlukan
-5. Copy token dan masukkan ke konfigurasi
-
-## ✅ Verifikasi Instalasi
-
-1. Restart Claude Code
-2. Buka chat baru
-3. Coba perintah berikut:
-
-```
-@threads get current user profile
-```
-
-Jika berhasil, Anda akan melihat profil user yang ter-authenticate.
-
-## 🛠 Tools yang Tersedia
-
-### 1. **get_current_user**
-Mendapatkan profil user yang sedang login
-```
-@threads get current user info
-```
-
-### 2. **get_user_profile** 
-Mendapatkan profil user berdasarkan ID
-```
-@threads get user profile for ID 12345
-```
-
-### 3. **get_user_threads**
-Mendapatkan posts/threads dari user
-```
-@threads get posts from user 12345 with limit 10
-```
-
-### 4. **search_threads**
-Mencari threads berdasarkan keyword
-```
-@threads search for "technology" in recent posts
-```
-
-## 🐛 Troubleshooting
-
-### Error "Access token required"
-- Pastikan `THREADS_ACCESS_TOKEN` sudah diset dengan benar
-- Periksa token masih valid
-
-### Error "Command not found"
-- Pastikan package sudah terinstall dengan benar
-- Coba install ulang: `npm install -g threads-mcp-server`
-
-### MCP server tidak terhubung
-- Restart Claude Code
-- Periksa format JSON konfigurasi
-- Cek logs di Claude Code untuk error detail
-
-## 📊 Contoh Penggunaan
-
-```
-# Mendapatkan profil saat ini
-@threads get my profile information
-
-# Mencari threads tentang AI
-@threads search for "artificial intelligence" in top posts
-
-# Mendapatkan 20 posts terbaru dari user tertentu
-@threads get 20 recent posts from user 24316150841377351
-
-# Mendapatkan detail profil lengkap
-@threads get detailed profile for user baguskrnnt
-```
-
-## 🔄 Update
-
-Untuk update ke versi terbaru:
 ```bash
-npm update -g threads-mcp-server
+git clone https://github.com/baguskto/threads-mcp.git
+cd threads-mcp
+npm install
+npm run build
+claude mcp add threads --env THREADS_ACCESS_TOKEN=TOKEN_ANDA -- node /path/ke/threads-mcp/dist/index.js
 ```
 
----
+## 3. Variabel lingkungan
 
-✨ **Server sudah siap digunakan!** Package `threads-mcp-server@1.0.0` sudah tersedia di npm registry.
+| Variabel | Wajib | Keterangan |
+| --- | --- | --- |
+| `THREADS_ACCESS_TOKEN` | ya | Long-lived token Threads |
+| `THREADS_USER_ID` | tidak | ID user Threads (menghemat satu panggilan `/me`) |
+| `THREADS_APP_SECRET` | tidak | Untuk `exchange_for_long_lived_token` |
+| `THREADS_READ_ONLY` | tidak | `true` = hanya tool baca (tidak bisa posting, hapus, atau menjadwalkan) |
+| `THREADS_SCHEDULE_FILE` | tidak | Lokasi file post terjadwal (default `~/.threads-mcp/scheduled-posts.json`) |
+
+## 4. Verifikasi
+
+Mulai ulang Claude, lalu minta:
+
+```
+Jalankan validate_setup untuk Threads
+```
+
+Hasilnya menunjukkan apakah token valid, kapan kedaluwarsa, dan scope apa yang belum ada beserta tool yang membutuhkannya.
+
+## 5. Contoh perintah
+
+```
+Posting ke Threads: "Halo dari Claude! 👋" dengan topic tag "AI"
+Buat polling: "Bahasa favorit?" pilihan TypeScript, Python, Go
+Jadwalkan post "Selamat pagi ☀️" besok jam 08:00 WIB
+Buat carousel dari 5 gambar ini dengan alt text masing-masing
+Tampilkan 5 post terbaik saya 30 hari terakhir
+Kapan waktu terbaik saya posting? Pakai zona waktu Asia/Jakarta
+Cari post terbaru dengan topik "MCP"
+Tampilkan balasan untuk post terakhir saya dan sembunyikan yang spam
+```
+
+## 6. Penjadwalan
+
+Threads API **tidak punya fitur jadwal bawaan**. `schedule_post` menyimpan post di komputer Anda dan server ini yang mempublikasikannya pada waktunya. Artinya server (klien MCP) harus berjalan pada waktu itu; post yang terlewat akan dipublikasikan begitu server berjalan lagi. Cek statusnya dengan `list_scheduled_posts`.
+
+## 7. Troubleshooting
+
+| Masalah | Solusi |
+| --- | --- |
+| `THREADS_ACCESS_TOKEN is not set` | Isi token di blok `env` konfigurasi MCP, lalu restart klien |
+| Error 190 / token invalid | Token kedaluwarsa. Buat token baru, atau jalankan `refresh_access_token` sebelum lewat 60 hari |
+| Permission denied | Scope belum diberikan. Jalankan `validate_setup` untuk melihat yang kurang |
+| Video gagal dipublikasikan | URL harus publik (HTTPS), MP4/MOV, maks. 5 menit / 1 GB. Cek dengan `get_container_status` |
+| Pencarian hanya menampilkan post sendiri | `threads_keyword_search` belum disetujui Meta (advanced access) |
+
+## 8. Update
+
+```bash
+npm update -g threads-mcp-server   # jika dipasang global
+```
+
+Dengan `npx -y threads-mcp-server`, versi terbaru dipakai otomatis. Lihat [CHANGELOG](CHANGELOG.md) untuk perubahan dan tabel migrasi dari v5 di [README](README.md#migrating-from-v5).

@@ -1,621 +1,201 @@
-# 🚀 Enterprise Threads MCP Server
+# Threads MCP Server
 
-A comprehensive MCP (Model Context Protocol) server for **professional Threads management** with enterprise-grade analytics, AI-powered optimization, and automation features.
+An [MCP](https://modelcontextprotocol.io) server for the **official Meta Threads API**. Let Claude (or any MCP client) publish posts, carousels, polls, replies and quotes, read your posts, replies, mentions and insights, search public posts, and schedule posts — using only endpoints Meta documents.
 
-## 🎯 **Enterprise-Ready Platform**
+- Built on the MCP TypeScript SDK v2 (`@modelcontextprotocol/server`), works with clients on protocol 2024-11-05 through 2025-11-25
+- 42 tools, each annotated as read-only or write so clients can auto-approve reads and confirm writes
+- Waits for media processing before publishing, retries transient errors, and validates posts before anything goes live
+- Optional read-only mode, and no token required just to start the server and list tools
 
-Complete social media management solution with advanced analytics, content optimization, and professional automation tools for businesses and power users.
+> **v6 is a rewrite.** Tools that called endpoints the Threads API does not have (likes, follows, blocks, follower lists, trending) were removed, and several were renamed or merged. See [Migrating from v5](#migrating-from-v5).
 
-## ✨ Enterprise Features
+## Quick start
 
-### 📊 **Phase 3A: Enhanced Analytics & Performance Analysis**
-- **Advanced Insights**: Demographic breakdowns, geographic analysis, time-series data
-- **Audience Analytics**: Detailed follower demographics and behavior patterns
-- **Engagement Trends**: Comprehensive trend analysis with growth projections
-- **AI-Driven Optimization**: Optimal posting times and performance recommendations
-- **Business Intelligence**: Professional reporting with comprehensive metrics
+### 1. Get an access token
 
-### 🚀 **Phase 3B: Professional Content Creation & Automation**
-- **AI Hashtag Suggestions**: Smart, industry-specific hashtag recommendations
-- **Content Optimization**: Professional analysis with scoring and recommendations
-- **Advanced Scheduling**: Automation with optimal timing and recurring posts
-- **Bulk Operations**: Performance analysis, content audit, and data export
-- **Website Integration**: Embed feeds, share buttons, and cross-platform sync
-- **Carousel Posts**: Multi-media posts with accessibility features
+1. Create an app at [developers.facebook.com](https://developers.facebook.com/apps) and add the **Threads API** use case.
+2. Add yourself as a Threads tester and accept the invite in Threads (Settings → Account → Website permissions).
+3. Request the scopes you need (see [Permissions](#permissions)); `threads_basic` and `threads_content_publish` cover posting.
+4. Generate a user token, then turn it into a **long-lived token** (60 days). You can do the exchange from the server with `exchange_for_long_lived_token` if you set `THREADS_APP_SECRET`.
 
-### 🎯 **Core Management Features**
-- **Content Management**: Create, view, search, and delete your threads
-- **Analytics Dashboard**: Real-time insights and performance metrics
-- **Interaction Management**: Handle replies, mentions, and user relationships
-- **Search & Discovery**: Advanced search with filters and content discovery
-- **Publishing Control**: Rate limits, scheduling, and automation
+A Threads profile no longer needs a linked Instagram account, except for follower counts and demographics.
 
-## 🚀 Quick Start
+### 2. Add the server to your client
 
-### Installation
+**Claude Code**
 
 ```bash
-npm install -g threads-mcp-server
+claude mcp add threads --env THREADS_ACCESS_TOKEN=your_token -- npx -y threads-mcp-server
 ```
 
-### ⚠️ **IMPORTANT: Business Account Required**
-
-**This MCP server requires a verified Instagram Business Account with proper API access.**
-
-### Prerequisites Setup
-
-**1. Instagram Business Account:**
-- Convert your Instagram to a Business Account
-- Complete Meta Business verification (1-3 days)
-- Ensure you have 100+ followers for demographic analytics
-
-**2. Meta Developer Setup:**
-- Create a Meta Developer App at [developers.facebook.com](https://developers.facebook.com)
-- Add "Threads API" product to your app
-- Request these required scopes:
-  - `threads_basic`
-  - `threads_content_publish` 
-  - `threads_manage_insights`
-  - `threads_read_replies`
-
-**3. OAuth Access Token:**
-- Complete OAuth flow with your business Instagram account
-- Generate an access token with all required scopes
-
-### Configuration
-
-Create a `.env` file with your Threads access token:
-
-```env
-THREADS_ACCESS_TOKEN=your_access_token_here
-```
-
-### ✅ **Validate Your Setup**
-
-After configuration, test your setup:
-
-```bash
-# Run the MCP server and test
-@threads validate_setup
-```
-
-This will check:
-- ✅ Token validity
-- ✅ Required scopes
-- ✅ Business account access
-- ✅ API permissions
-
-Follow any recommendations provided by the validation tool.
-
-### Claude Desktop Setup
-
-Add to your Claude Desktop configuration:
+**Claude Desktop** (`claude_desktop_config.json`) and other clients that use the same format:
 
 ```json
 {
   "mcpServers": {
     "threads": {
-      "command": "threads-mcp-server",
+      "command": "npx",
+      "args": ["-y", "threads-mcp-server"],
       "env": {
-        "THREADS_ACCESS_TOKEN": "your_access_token_here"
+        "THREADS_ACCESS_TOKEN": "your_long_lived_token"
       }
     }
   }
 }
 ```
 
-## 🛠️ Available Tools
+Requires Node.js 20.12 or newer.
 
-### Profile & Account Management
+### 3. Check the setup
 
-#### `get_my_profile`
-Get your Threads profile information
-```typescript
-{
-  fields?: string[] // Profile fields to retrieve
-}
-```
+Ask the assistant to run `validate_setup`. It confirms the token works, shows when it expires, and lists missing scopes together with the tools they unlock.
 
-#### `get_my_insights`
-Get analytics for your account
-```typescript
-{
-  metrics: string[];    // e.g., ['followers_count', 'posts_count']
-  period?: string;      // 'day', 'week', 'days_28', 'month', 'lifetime'
-  since?: string;       // ISO 8601 date
-  until?: string;       // ISO 8601 date
-}
-```
+## Configuration
 
-#### `get_publishing_limit`
-Check your current posting quotas and limits
-```typescript
-{} // No parameters needed
-```
+| Variable | Required | Description |
+| --- | --- | --- |
+| `THREADS_ACCESS_TOKEN` | yes | Long-lived Threads user token |
+| `THREADS_USER_ID` | no | Your Threads user ID; skips one `/me` lookup |
+| `THREADS_APP_SECRET` | no | Enables `exchange_for_long_lived_token` |
+| `THREADS_READ_ONLY` | no | `true` to expose only read tools (no publishing, deleting or scheduling) |
+| `THREADS_SCHEDULE_FILE` | no | Where scheduled posts are stored (default `~/.threads-mcp/scheduled-posts.json`) |
+| `THREADS_API_VERSION` | no | Graph API version (default `v1.0`) |
+| `THREADS_API_BASE_URL` | no | Graph host (default `https://graph.threads.net`) |
 
-### Content Management
+A `.env` file in the working directory is loaded too.
 
-#### `get_my_threads`
-Get your own threads/posts
-```typescript
-{
-  fields?: string[];    // Thread fields to retrieve
-  limit?: number;       // Number of threads to get
-  since?: string;       // ISO 8601 date filter
-  until?: string;       // ISO 8601 date filter
-}
-```
+## Tools
 
-#### `publish_thread`
-Create and publish a new thread using Threads API two-step process
-```typescript
-{
-  text: string;           // Thread content (required)
-  media_type?: string;    // 'TEXT', 'IMAGE', 'VIDEO'
-  media_url?: string;     // URL for media content
-  location_name?: string; // Location tagging
-}
-```
-*Note: This function implements the proper two-step Threads publishing flow: first creates a media container, then publishes it. The response includes both the container ID and final thread ID.*
+### Account
 
-#### `delete_thread`
-Delete one of your threads
-```typescript
-{
-  thread_id: string; // ID of your thread to delete
-}
-```
+| Tool | What it does |
+| --- | --- |
+| `get_my_profile` | Your profile: username, name, bio, avatar, verification |
+| `validate_setup` | Token check, expiry, granted vs. missing scopes |
+| `get_publishing_limit` | 24-hour quota usage for posts (250), replies (1,000), deletes (100), location searches (500) |
+| `refresh_access_token` | Extend a long-lived token by 60 days and use it for the session |
+| `exchange_for_long_lived_token` | Swap a short-lived token for a long-lived one (needs `THREADS_APP_SECRET`) |
 
-#### `search_my_threads`
-Search within your own threads
-```typescript
-{
-  query: string;   // Search keywords
-  limit?: number;  // Threads to search through
-}
-```
+### Publishing
 
-### Thread Interactions
+| Tool | What it does |
+| --- | --- |
+| `publish_thread` | Text, image or video post. Text posts can add a link preview, a poll (2–4 options), a GIPHY GIF, spoiler ranges, a long-form text attachment (up to 10,000 characters) or be a 24-hour ghost post. Every post can set a topic tag, reply control, location, country allowlist, reply approvals and Instagram Story cross-sharing. `publish: false` creates a draft container instead. |
+| `create_carousel_post` | 2–20 images and/or videos with alt text |
+| `create_reply` | Reply to a post, with the same options as `publish_thread` |
+| `quote_post` | Quote another post |
+| `create_thread_chain` | Multi-part thread; every part is validated before the first one goes live, and a failure tells you where to resume |
+| `repost_thread` | Repost a post |
+| `delete_thread` | Delete one of your posts |
+| `get_container_status` / `publish_container` | Inspect and publish a container later (drafts, or slow videos) |
 
-#### `get_thread_replies`
-Get replies to your specific thread
-```typescript
-{
-  thread_id: string;    // Your thread ID
-  fields?: string[];    // Reply fields to retrieve
-}
-```
+### Scheduling
 
-#### `manage_reply`
-Hide or show replies to your threads
-```typescript
-{
-  reply_id: string; // Reply ID to manage
-  hide: boolean;    // true to hide, false to show
-}
-```
+The Threads API has no native scheduling, so `schedule_post` saves the post locally and this server publishes it at the requested time. The server has to be running then; anything overdue is published as soon as it starts. Media containers are created at publish time, since they expire after 24 hours.
 
-#### `get_mentions`
-Get threads where you are mentioned
-```typescript
-{
-  fields?: string[];  // Fields to retrieve
-  limit?: number;     // Number of mentions
-}
-```
+| Tool | What it does |
+| --- | --- |
+| `schedule_post` | Schedule a post, reply, quote or carousel for an ISO 8601 time |
+| `list_scheduled_posts` | Pending, published, failed and cancelled posts with their results |
+| `cancel_scheduled_post` | Cancel a pending post |
 
-#### `create_reply`
-Reply to a specific thread or post
-```typescript
-{
-  reply_to_id: string;     // Thread/post ID to reply to (required)
-  text: string;            // Reply content (required)
-  media_type?: string;     // 'TEXT', 'IMAGE', 'VIDEO'
-  media_url?: string;      // Media URL for IMAGE/VIDEO
-  reply_control?: string;  // 'everyone', 'accounts_you_follow', etc.
-}
-```
-*Note: Uses two-step process like publish_thread. Creates real replies that appear in thread conversations.*
+### Reading
 
-#### `create_thread_chain`
-Create connected reply chains for threaded conversations
-```typescript
-{
-  parent_thread_id: string;  // Starting thread ID (required)
-  replies: Array<{           // Array of replies (required)
-    text: string;            // Reply text
-    reply_control?: string;  // Who can reply to this reply
-  }>;
-}
-```
-*Note: Creates true threaded conversations where each reply responds to the previous one, enabling Twitter-like thread chains.*
+| Tool | What it does |
+| --- | --- |
+| `get_my_threads` | Your posts, with date filters |
+| `get_thread` | One post by ID |
+| `search_my_threads` | Find text in your own posts |
+| `get_mentions` | Public posts that mention you |
+| `get_ghost_posts` | Your ghost posts |
+| `get_poll_results` | Options, vote percentages and expiry of a poll |
+| `lookup_profile` / `get_profile_posts` | Public profiles and their posts, by username |
+| `get_oembed` | Embed HTML for a post |
+| `create_web_intent_link` | A threads.com link that opens a prefilled composer or a follow prompt — for things the API can't do, like following |
 
-### Analytics & Performance
+### Replies
 
-#### `get_thread_insights`
-Get performance metrics for your specific thread
-```typescript
-{
-  thread_id: string;    // Your thread ID
-  metrics: string[];    // e.g., ['views', 'likes', 'replies']
-  period?: string;      // Time period for metrics
-}
-```
+| Tool | What it does |
+| --- | --- |
+| `get_thread_replies` | Top-level replies to a post |
+| `get_conversation` | The whole conversation, flattened |
+| `get_my_replies` | Replies you posted |
+| `manage_reply` | Hide or unhide a reply |
+| `get_pending_replies` / `manage_pending_reply` | Review replies on posts published with reply approvals |
 
-### 🔧 Setup Validation & Diagnostics
+### Insights
 
-#### `validate_setup`
-**NEW in v5.0.0** - Comprehensive setup validation and diagnostics
-```typescript
-{
-  check_scopes?: boolean;          // Check if all required scopes are present
-  required_scopes?: string[];      // Custom list of required scopes to check
-}
-```
+| Tool | What it does |
+| --- | --- |
+| `get_thread_insights` | Views, likes, replies, reposts, quotes and shares for a post |
+| `get_my_insights` | Account views (per day), likes, replies, reposts, quotes, link clicks and follower count |
+| `get_audience_demographics` | Followers by country, city, age or gender (100+ followers) |
+| `get_content_performance_report` | Totals, averages, engagement rate, results by media type and top posts over a window, from real per-post insights |
+| `analyze_best_posting_times` | Weekdays and hours when your own posts performed best, in your timezone |
 
-**What it checks:**
-- ✅ Access token validity
-- ✅ Required API scopes
-- ✅ Business account verification
-- ✅ Profile access permissions
-- 📋 Provides specific setup recommendations
+### Search and locations
 
-**Example response:**
-```json
-{
-  "status": "valid",
-  "token_validation": { "valid": true },
-  "scope_validation": { "hasRequired": true, "missing": [] },
-  "profile_access": { "success": true },
-  "setup_recommendations": ["✅ Setup appears to be correct!"]
-}
-```
+| Tool | What it does |
+| --- | --- |
+| `search_posts` | Keyword or topic-tag search, TOP or RECENT, filtered by media type, author and date |
+| `get_recently_searched_keywords` | Your recent searches |
+| `search_locations` / `get_location` | Find location IDs to tag |
 
-## 🏢 Enterprise Analytics & Automation Tools (Phase 3)
+## Permissions
 
-### 📊 Advanced Analytics
+| Scope | Unlocks |
+| --- | --- |
+| `threads_basic` | Every tool |
+| `threads_content_publish` | Posts, carousels, quotes, reposts, thread chains |
+| `threads_manage_replies` | Publishing replies, hiding replies, reply approvals |
+| `threads_read_replies` | Reading replies and conversations |
+| `threads_manage_insights` | Insights, demographics, reports |
+| `threads_manage_mentions` | Mentions |
+| `threads_keyword_search` | Searching beyond your own posts |
+| `threads_delete` | Deleting posts |
+| `threads_location_tagging` | Location search and tagging |
+| `threads_profile_discovery` | Public profile lookup |
+| `threads_share_to_instagram` | Cross-sharing to Instagram Stories |
 
-#### `get_enhanced_insights`
-Get comprehensive analytics with demographic breakdowns
-```typescript
-{
-  thread_id?: string;           // Optional thread ID for media insights
-  metrics: string[];            // views, likes, replies, followers_count, follower_demographics
-  period?: string;              // day, week, month, lifetime
-  breakdown?: string[];         // country, city, age, gender
-  since?: string;               // ISO 8601 start date
-  until?: string;               // ISO 8601 end date
-}
-```
+Until Meta approves an advanced permission, some tools only see your own or your testers' data — for example, search returns only your posts and profile lookup works only for official Meta accounts.
 
-#### `get_audience_demographics`
-Detailed audience demographic analysis
-```typescript
-{
-  categories: string[];         // country, age, gender, city
-  period?: string;             // day, week, month, lifetime
-  breakdown?: string;          // Demographic breakdown level
-}
-```
+## What the Threads API can't do
 
-#### `get_engagement_trends`
-Time-series analysis of engagement patterns
-```typescript
-{
-  metrics: string[];           // views, likes, replies, shares
-  timeframe?: string;          // week, month, quarter
-  granularity?: string;        // daily, weekly
-}
-```
+There are no endpoints for liking, following, blocking, listing followers, listing likers, trending feeds, direct messages, editing posts, uploading files (media must be public URLs) or undoing a repost. This server doesn't pretend otherwise. For following, `create_web_intent_link` gives you a link to click.
 
-#### `get_follower_growth_analytics`
-Follower growth analysis with projections
-```typescript
-{
-  period?: string;             // month, quarter, year
-  include_projections?: boolean; // Include growth forecasts
-  projection_days?: number;    // Days to project forward
-}
-```
+## Migrating from v5
 
-#### `analyze_best_posting_times`
-AI-driven optimal posting time analysis
-```typescript
-{
-  analysis_period?: string;    // week, month, quarter
-  timezone?: string;           // User's timezone
-  content_type?: string;       // general, promotional, educational
-}
-```
+| v5 tool | v6 |
+| --- | --- |
+| `like_post`, `unlike_post`, `get_post_likes` | Removed — no API endpoint. Like counts are in `get_thread_insights`. |
+| `follow_user`, `unfollow_user`, `block_user`, `get_user_followers`, `get_user_following` | Removed — no API endpoint. Use `create_web_intent_link` for follow links. |
+| `unrepost_thread` | Removed — not supported by the API |
+| `get_trending_posts` | Use `search_posts` with `search_type: "TOP"` |
+| `search_users` | `lookup_profile` (exact username) |
+| `search_mentions` | `get_mentions` |
+| `search_by_hashtags`, `search_by_topics` | `search_posts` with `search_mode: "TAG"` |
+| `create_post_with_restrictions` | `publish_thread` (`reply_control`, `allowlisted_country_codes`, `topic_tag`) |
+| `get_enhanced_insights`, `get_engagement_trends`, `get_follower_growth_analytics` | `get_my_insights` / `get_thread_insights` |
+| `schedule_post` (two conflicting versions) | `schedule_post` with `publish_at`, plus `list_scheduled_posts` and `cancel_scheduled_post` |
+| `auto_hashtag_suggestions`, `content_optimization_analysis` | Removed — they were keyword heuristics; your assistant does this better directly |
+| `bulk_post_management` | `get_content_performance_report` |
+| `website_integration_setup` | `get_oembed` |
+| `create_carousel_post` `media_urls` / `alt_texts` | `items: [{ url, type?, alt_text? }]` |
+| `publish_thread` `media_type` + `media_url` | Still accepted; prefer `image_url` / `video_url` |
+| `get_thread_replies` `reverse` | `oldest_first` |
 
-#### `get_content_performance_report`
-Comprehensive performance reporting
-```typescript
-{
-  report_type: string;         // summary, detailed, top_performers
-  period: string;              // week, month, quarter
-  metrics: string[];           // Performance metrics to include
-  include_comparisons?: boolean; // Period-over-period comparisons
-}
-```
+## Development
 
-### 🚀 Professional Content Creation & Automation
-
-#### `auto_hashtag_suggestions`
-AI-powered hashtag recommendations
-```typescript
-{
-  content: string;             // Content to analyze
-  media_url?: string;          // Optional media for visual analysis
-  suggestion_settings?: {
-    count?: number;            // Number of suggestions (1-10)
-    style?: string;            // trending, niche, branded, mixed
-    exclude_overused?: boolean; // Filter out overused hashtags
-    industry_focus?: string;   // Industry/niche focus
-  }
-}
-```
-
-#### `content_optimization_analysis`
-Professional content analysis with recommendations
-```typescript
-{
-  content: string;             // Content to analyze
-  analysis_type?: string;      // engagement, reach, accessibility, seo, comprehensive
-  target_audience?: {
-    demographics?: string[];   // Target demographic groups
-    interests?: string[];      // Target interests
-    timezone?: string;         // Primary audience timezone
-  };
-  optimization_goals?: string[]; // increase_engagement, expand_reach, etc.
-}
-```
-
-#### `schedule_post`
-Advanced scheduling with automation features
-```typescript
-{
-  text: string;                // Post content
-  media_url?: string;          // Optional media URL
-  schedule_time?: string;      // ISO 8601 datetime for scheduling
-  automation_settings?: {
-    auto_optimize_time?: boolean; // Auto-optimize posting time
-    recurring?: string;        // none, daily, weekly, monthly
-    auto_hashtags?: boolean;   // Auto-add relevant hashtags
-    content_variation?: boolean; // Create variations for recurring posts
-  };
-  timezone?: string;           // Timezone for scheduling
-}
-```
-
-#### `create_carousel_post`
-Multi-media carousel posts with accessibility
-```typescript
-{
-  media_urls: string[];        // 2-10 image/video URLs
-  text: string;                // Post caption
-  alt_texts?: string[];        // Alt text for accessibility
-  carousel_settings?: {
-    auto_alt_text?: boolean;   // Generate alt text automatically
-    aspect_ratio?: string;     // square, portrait, landscape
-    thumbnail_selection?: string; // auto, first, custom
-  }
-}
-```
-
-#### `bulk_post_management`
-Bulk operations and content management
-```typescript
-{
-  action: string;              // analyze_performance, content_audit, export_data
-  filters?: {
-    date_range?: { start: string; end: string };
-    content_type?: string;     // text, image, video, carousel
-    performance_threshold?: string; // low, medium, high
-  };
-  bulk_operations?: {
-    add_hashtags?: string[];   // Hashtags to add
-    update_alt_text?: boolean; // Update alt text
-    archive_low_performers?: boolean; // Archive underperforming posts
-  }
-}
-```
-
-#### `website_integration_setup`
-Website integration and cross-platform sync
-```typescript
-{
-  integration_type: string;    // embed_feed, share_buttons, webhook_setup, auto_crosspost
-  website_config?: {
-    domain?: string;           // Website domain
-    platform?: string;        // wordpress, shopify, custom, react, vue, angular
-    styling_preferences?: {
-      theme?: string;          // light, dark, auto
-      layout?: string;         // grid, list, carousel
-      post_count?: number;     // Number of posts to display
-    }
-  };
-  automation_settings?: {
-    auto_sync?: boolean;       // Auto-sync new posts
-    crosspost_enabled?: boolean; // Enable cross-posting
-    webhook_url?: string;      // Webhook endpoint URL
-  }
-}
-```
-
-## 📊 Test Results
-
-**Latest Test Results**: ✅ 10+ functions working + Complete Phase 1 implementation!
-
-### Core Functions
-| Tool | Status | Notes |
-|------|--------|-------|
-| `get_my_profile` | ✅ Working | Full profile data |
-| `get_my_threads` | ✅ Working | Returns thread list |
-| `search_my_threads` | ✅ Working | Client-side filtering |
-| `get_publishing_limit` | ✅ Working | Quota information |
-| `publish_thread` | ✅ Working | **Successfully publishes!** |
-| `delete_thread` | ⚠️ Limited | Error 400 (endpoint issue) |
-| `get_my_insights` | ⚠️ Limited | Error 500 (permission/endpoint) |
-
-### Phase 1: Complete Engagement & Advanced Posting (NEW)
-| Tool | Status | Notes |
-|------|--------|-------|
-| `create_reply` | ✅ **Phase 1** | **Creates real replies!** |
-| `create_thread_chain` | ✅ **Phase 1** | **True threaded conversations!** |
-| `quote_post` | ✅ **Phase 1A** | **Quote tweets with commentary!** |
-| `like_post` | 🔧 **Phase 1A** | Implemented with fallback patterns |
-| `unlike_post` | 🔧 **Phase 1A** | Implemented with fallback patterns |
-| `repost_thread` | 🔧 **Phase 1A** | Implemented with fallback patterns |
-| `unrepost_thread` | 🔧 **Phase 1A** | Implemented with fallback patterns |
-| `get_post_likes` | 🔧 **Phase 1A** | Implemented with fallback patterns |
-| `create_post_with_restrictions` | ✅ **Phase 1B** | **Advanced posts with hashtags!** |
-| `schedule_post` | ✅ **Phase 1B** | **Future post scheduling!** |
-
-**Total Tools**: 21 functions (11 original + 10 new Phase 1 features)
-
-## 💡 Usage Examples
-
-### Content Creation & Management
 ```bash
-# Publish a new thread
-@threads publish "Just testing my personal Threads manager! 🚀"
-
-# Get my recent threads
-@threads get my recent threads limit 10
-
-# Search my content
-@threads search "project" in my threads
+npm install
+npm run typecheck
+npm test          # unit and tool tests against a mocked Threads API, no token needed
+npm run build
+npm run dev       # run from source with tsx
 ```
 
-### Phase 1A: Engagement & Interaction
-```bash
-# Quote another post with your commentary
-@threads quote post 123456 "This is exactly what I was thinking! Adding my perspective..."
+The code is split into `src/threads` (HTTP client, publishing flow, errors) and `src/tools` (one module per tool group). See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-# Like and unlike posts
-@threads like post 123456
-@threads unlike post 123456
-
-# Repost content (share to your timeline)
-@threads repost thread 123456
-@threads unrepost thread 123456
-
-# Get engagement data
-@threads get likes for post 123456 limit 50
-```
-
-### Phase 1B: Advanced Posting
-```bash  
-# Create post with hashtags and restrictions
-@threads create advanced post "My latest project update!" 
-  hashtags: ["WebDev", "MCP", "Threads"]
-  mentions: ["techfriend", "developer"]
-  reply_control: "followers_only"
-  location: "San Francisco"
-
-# Schedule posts for future publishing
-@threads schedule post "Good morning! ☀️" 
-  for: "2025-08-25T08:00:00+07:00"
-  reply_control: "everyone"
-```
-
-### Reply & Thread Management
-```bash
-# Reply to a specific thread
-@threads reply to thread 123456 "Great post! Thanks for sharing"
-
-# Create a thread chain (multiple connected replies)
-@threads create chain from thread 123456 with replies:
-- "First point in my response 🧵"  
-- "Second point continuing the thought"
-- "Final point wrapping up"
-
-# Get replies to my thread
-@threads get replies to my thread 123456
-```
-
-### Analytics & Performance
-```bash
-# Check my publishing limits
-@threads check my publishing quotas
-
-# Get my profile stats
-@threads get my profile information
-
-# Get thread performance (if available)
-@threads get insights for thread 123456
-```
-
-### Interaction Management
-```bash
-# Get replies to my thread
-@threads get replies for my thread 123456
-
-# Hide a reply
-@threads hide reply 789012
-
-# Get my mentions
-@threads get where I am mentioned
-```
-
-## 🔧 Technical Details
-
-### Personal Focus Benefits
-- **No External User Limitations**: Only works with your own content
-- **Full Access**: All permissions work on your own data
-- **Reliable**: No privacy restrictions or access denials
-- **Fast**: Direct API calls without workarounds
-
-### Error Handling
-- Automatic retry for transient errors
-- Clear error messages for permission issues
-- Graceful handling of API limitations
-
-### Rate Limiting
-- Built-in exponential backoff
-- Respects Threads API rate limits
-- Smart retry logic for temporary failures
-
-## 🚨 Important Notes
-
-### Permissions Required
-Ensure your Threads app has these permissions enabled:
-- `threads_basic` - Basic thread access
-- `threads_content_publish` - Create/publish content
-- `threads_delete` - Delete threads (if using delete functionality)
-- `threads_manage_insights` - Analytics access
-- `threads_manage_replies` - Reply management
-
-### Limitations
-- **Delete Function**: Currently returns 400 error (API endpoint needs verification)
-- **Insights**: Some analytics endpoints return 500 error (may need additional permissions)
-- **Personal Only**: Designed only for your own content management
-
-## 📈 Roadmap
-
-### Planned Improvements
-- [ ] Fix delete thread endpoint
-- [ ] Resolve insights API issues  
-- [ ] Add batch operations
-- [ ] Enhanced search filters
-- [ ] Thread scheduling
-- [ ] Content analytics dashboard
-
-## 🤝 Contributing
-
-This is a focused personal management tool. Feature requests should align with personal Threads management use cases.
-
-## 📄 License
+## License
 
 MIT
-
----
-
-## 🎯 **Perfect For:**
-- **Content Creators**: Manage your Threads content efficiently
-- **Social Media Managers**: Handle personal brand accounts  
-- **Analysts**: Track your own content performance
-- **Developers**: Integrate Threads into personal workflows
-
-**Focus**: Your content, your control, your insights! 🚀

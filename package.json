@@ -1,58 +1,55 @@
 {
   "name": "threads-mcp-server",
-  "version": "5.1.0",
-  "description": "Professional Threads MCP Server - Fixed API issues, enhanced setup validation, and enterprise features",
+  "version": "6.0.0",
+  "description": "MCP server for the official Meta Threads API: publish posts, carousels, polls, replies and quotes, read insights, search, and schedule posts.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
   "bin": {
-    "threads-mcp": "./dist/index.js"
+    "threads-mcp-server": "dist/index.js",
+    "threads-mcp": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
-    "clean": "rm -rf dist",
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "prepublishOnly": "npm run clean && npm run build",
-    "test": "echo 'No tests configured yet'",
-    "lint": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "prepublishOnly": "npm run clean && npm run build && npm test"
   },
   "keywords": [
     "mcp",
+    "mcp-server",
+    "model-context-protocol",
     "threads",
+    "threads-api",
     "meta",
-    "api",
-    "modelcontextprotocol",
-    "analytics",
-    "automation",
-    "enterprise",
     "social-media",
-    "ai-powered",
-    "content-optimization"
+    "scheduling",
+    "analytics"
   ],
   "author": "baguskto",
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.17.4",
-    "axios": "^1.7.2",
-    "dotenv": "^16.4.5",
-    "zod": "^3.23.8"
+    "@modelcontextprotocol/server": "^2.3.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/jest": "^29.5.12",
-    "@types/node": "^20.14.0",
-    "jest": "^29.7.0",
-    "ts-jest": "^29.1.5",
-    "tsx": "^4.15.0",
-    "typescript": "^5.5.0"
+    "@modelcontextprotocol/client": "^2.3.1",
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
   },
   "files": [
     "dist/**/*",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.12"
   },
   "repository": {
     "type": "git",
