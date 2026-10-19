@@ -97,20 +97,28 @@ export function createServer(config: Config, options: CreateServerOptions = {}) 
     publish: basePublish,
     publishOptions: (req) => {
       const progressToken = req.mcpReq._meta?.progressToken;
+      const callStart = Date.now();
+      const timeoutMs = basePublish.timeoutMs ?? (config.publishWaitSeconds ?? DEFAULT_PUBLISH_WAIT_SECONDS) * 1000;
+      let lastProgress = -1;
       return {
         ...basePublish,
-        timeoutMs: basePublish.timeoutMs ?? (config.publishWaitSeconds ?? DEFAULT_PUBLISH_WAIT_SECONDS) * 1000,
+        timeoutMs,
+        // One budget for the whole tool call, however many containers it waits on.
+        deadline: callStart + timeoutMs,
         signal: req.mcpReq.signal,
         onProgress:
           progressToken === undefined
             ? undefined
-            : ({ containerId, elapsedMs }) => {
+            : ({ containerId }) => {
+                if (req.mcpReq.signal.aborted) return;
+                // Progress must increase with every notification, across all containers in the call.
+                lastProgress = Math.max(lastProgress + 1, Math.round((Date.now() - callStart) / 1000));
                 req.mcpReq
                   .notify({
                     method: 'notifications/progress',
                     params: {
                       progressToken,
-                      progress: Math.round(elapsedMs / 1000),
+                      progress: lastProgress,
                       message: `Waiting for media container ${containerId} to finish processing`,
                     },
                   })

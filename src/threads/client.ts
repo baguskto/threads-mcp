@@ -113,16 +113,28 @@ export class ThreadsClient {
       items.push(...(page.data ?? []));
       const next = page.paging?.next;
       if (items.length >= maxItems || !next || !page.data?.length) break;
-      page = await this.request<Page<T>>('GET', next);
+      page = await this.request<Page<T>>('GET', this.rebase(next));
     }
     return items.slice(0, maxItems);
+  }
+
+  /**
+   * Points a `paging.next` link at the configured host. Graph returns links on
+   * its own host, which would bypass a proxy set with THREADS_API_BASE_URL.
+   */
+  private rebase(link: string): string {
+    const url = new URL(link);
+    const base = new URL(this.base);
+    if (url.origin === base.origin) return url.toString();
+    const prefix = base.pathname.replace(/\/+$/, '');
+    return new URL(`${prefix}${url.pathname}${url.search}`, base.origin).toString();
   }
 
   private buildUrl(path: string, versioned = true): URL {
     if (/^https?:\/\//.test(path)) {
       // Only follow pagination links that point back at the configured API host.
       const url = new URL(path);
-      if (url.origin !== new URL(this.base).origin) throw new Error(`Refusing to follow a link to ${url.origin}`);
+      if (!`${url.origin}${url.pathname}`.startsWith(this.base)) throw new Error(`Refusing to follow a link to ${url.origin}`);
       return url;
     }
     const normalized = path.startsWith('/') ? path : `/${path}`;

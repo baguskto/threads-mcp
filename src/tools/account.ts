@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { ToolContext } from '../server.js';
 import { PROFILE_FIELDS } from '../threads/fields.js';
-import { describeError } from '../threads/errors.js';
+import { describeError, ThreadsApiError } from '../threads/errors.js';
 import { fieldsParam, handler } from './util.js';
 
 /** Scopes the full tool set can use, and which tools need each one. */
@@ -60,10 +60,17 @@ export function registerAccountTools(server: McpServer, ctx: ToolContext) {
       const unavailable: string[] = [];
       for (const { scope, fields } of optional) {
         try {
+          // Not retried: without the scope Threads answers with a 500, which would otherwise be retried 3 times.
           const extra = await client.get<{ data?: Record<string, unknown>[] }>(path, { fields }, { retries: 0 });
           Object.assign(limits, extra.data?.[0]);
-        } catch {
-          unavailable.push(`${fields.join(', ')} (needs ${scope})`);
+        } catch (error) {
+          const permission =
+            error instanceof ThreadsApiError && (error.code === 10 || (error.code !== undefined && error.code >= 200 && error.code < 300));
+          unavailable.push(
+            permission
+              ? `${fields.join(', ')}: needs ${scope}`
+              : `${fields.join(', ')}: ${describeError(error)} (Threads also fails this way when the token lacks ${scope})`,
+          );
         }
       }
       return unavailable.length ? { ...limits, unavailable } : limits;

@@ -14,6 +14,14 @@ export interface Config {
 
 const truthy = (v?: string) => ['1', 'true', 'yes'].includes(v?.trim().toLowerCase() ?? '');
 
+/** A non-negative number of seconds; 0 is valid (return immediately). */
+function parseSeconds(value?: string): number | undefined {
+  if (value === undefined || value.trim() === '') return undefined;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) throw new Error(`THREADS_PUBLISH_WAIT_SECONDS must be a number of seconds >= 0, got "${value}"`);
+  return n;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const baseUrl = env.THREADS_API_BASE_URL?.trim();
   let apiVersion = env.THREADS_API_VERSION?.trim();
@@ -33,7 +41,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     appSecret: env.THREADS_APP_SECRET?.trim() || undefined,
     scheduleFile: env.THREADS_SCHEDULE_FILE?.trim() || undefined,
     readOnly: truthy(env.THREADS_READ_ONLY),
-    publishWaitSeconds: Number(env.THREADS_PUBLISH_WAIT_SECONDS) || undefined,
+    publishWaitSeconds: parseSeconds(env.THREADS_PUBLISH_WAIT_SECONDS),
   };
 }
 

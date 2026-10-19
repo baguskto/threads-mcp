@@ -115,13 +115,18 @@ test('recover() only fails posts whose publishing process is gone', () =>
       created_at: now,
       status: 'publishing',
       payload: { text: id },
-      claimed_by: { pid, at: now },
+      claimed_by: { pid, instance: 'other-instance', at: now },
     });
-    await writeFile(file, JSON.stringify({ version: 1, posts: [post('alive', process.pid), post('dead', 2 ** 22 + 12345)] }));
+    // The parent (test runner) is alive; a claim with our own pid but another instance id is an earlier, dead server.
+    await writeFile(
+      file,
+      JSON.stringify({ version: 1, posts: [post('alive', process.ppid), post('dead', 2 ** 22 + 12345), post('reused-pid', process.pid)] }),
+    );
     await make().recover();
     const saved = JSON.parse(await readFile(file, 'utf8')).posts;
     assert.equal(saved.find((p: any) => p.id === 'alive').status, 'publishing');
     assert.equal(saved.find((p: any) => p.id === 'dead').status, 'failed');
+    assert.equal(saved.find((p: any) => p.id === 'reused-pid').status, 'failed');
   }));
 
 test('a stale lock left by a crashed process is broken', () =>
@@ -137,6 +142,40 @@ test('a stale lock left by a crashed process is broken', () =>
 test('a corrupt schedule file is reported instead of being overwritten', () =>
   withScheduler(async ({ file, make }) => {
     await writeFile(file, '{not json');
-    await assert.rejects(make().add({ text: 'x' }, new Date('2026-01-02T00:00:00Z')), /not valid JSON/);
+    await assert.rejects(make().add({ text: 'x' }, new Date('2026-01-02T00:00:00Z')), /not in the expected format/);
     assert.equal(await readFile(file, 'utf8'), '{not json');
+  }));
+
+test('valid JSON of the wrong shape is not overwritten either', () =>
+  withScheduler(async ({ file, make }) => {
+    for (const content of ['[{"id":"keep-me"}]', '{"version":1,"posts":{"0":{}}}', 'null']) {
+      await writeFile(file, content);
+      await assert.rejects(make().add({ text: 'x' }, new Date('2026-01-02T00:00:00Z')), /expected format/);
+      assert.equal(await readFile(file, 'utf8'), content);
+    }
+  }));
+
+test('an outcome that could not be saved is written on the next run, before anything new is claimed', () =>
+  withScheduler(async ({ file, clock, published, make }) => {
+    const scheduler = make();
+    await scheduler.add({ text: 'a' }, new Date('2026-01-01T00:10:00Z'));
+    clock.now = new Date('2026-01-01T00:20:00Z');
+    // Simulate the outcome write failing once (e.g. the file stayed locked).
+    const original = (scheduler as any).recordOutcome.bind(scheduler);
+    let failOnce = true;
+    (scheduler as any).recordOutcome = async (...args: any[]) => {
+      if (failOnce) {
+        failOnce = false;
+        throw new Error('Schedule file is locked');
+      }
+      return original(...args);
+    };
+    await assert.rejects(scheduler.runDue(), /locked/);
+    assert.deepEqual(published, ['a']);
+    // Still ours and unsaved, so recovery must not mark it failed.
+    await scheduler.recover();
+    assert.equal(JSON.parse(await readFile(file, 'utf8')).posts[0].status, 'publishing');
+    const [post] = await scheduler.runDue();
+    assert.equal(post.status, 'published');
+    assert.deepEqual(published, ['a'], 'not published twice');
   }));

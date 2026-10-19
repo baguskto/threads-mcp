@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { link, mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describeError } from './threads/errors.js';
@@ -16,15 +16,22 @@ export interface ScheduledPost<P = unknown> {
   result?: unknown;
   error?: string;
   updated_at?: string;
-  /** Which process is publishing it, so a restart can tell a crash from a peer still at work. */
-  claimed_by?: { pid: number; at: string };
+  /** Which server instance is publishing it, so a restart can tell a crash from a peer still at work. */
+  claimed_by?: { pid: number; instance: string; at: string };
 }
+
+type Outcome<P> = Pick<ScheduledPost<P>, 'status' | 'result' | 'error'>;
 
 export const defaultScheduleFile = () => join(homedir(), '.threads-mcp', 'scheduled-posts.json');
 
 /** A claim older than this is treated as abandoned even if its process id is alive (pids get reused). */
 const CLAIM_TIMEOUT_MS = 30 * 60_000;
-const STALE_LOCK_MS = 60_000;
+/** The lock is only held for a file read and write, so one this old was left by a crashed process. */
+const STALE_LOCK_MS = 15_000;
+/** How long to keep trying for the lock; longer than STALE_LOCK_MS so a stale lock is broken first. */
+const LOCK_WAIT_MS = 30_000;
+/** The break-lock is held for a few milliseconds; one this old was left by a crash mid-break. */
+const STALE_BREAKER_MS = 5_000;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -35,6 +42,13 @@ function processAlive(pid: number): boolean {
   } catch (error: any) {
     return error?.code === 'EPERM';
   }
+}
+
+async function fileAge(path: string): Promise<number | undefined> {
+  return stat(path).then(
+    (s) => Date.now() - s.mtimeMs,
+    () => undefined,
+  );
 }
 
 /**
@@ -49,6 +63,10 @@ function processAlive(pid: number): boolean {
 export class Scheduler<P = unknown> {
   private timer?: NodeJS.Timeout;
   private running = false;
+  /** Outcomes of finished publishes that could not be written yet; retried before anything new is claimed. */
+  private unsaved = new Map<string, Outcome<P>>();
+  /** Distinguishes this server from an earlier one that had the same pid (common in containers). */
+  private readonly instance = randomUUID();
 
   constructor(
     private readonly file: string,
@@ -98,6 +116,15 @@ export class Scheduler<P = unknown> {
     this.running = true;
     const processed: ScheduledPost<P>[] = [];
     try {
+      // A post that went out must never be left looking unpublished, so first
+      // write any outcome a previous run could not save.
+      for (const [id, outcome] of [...this.unsaved]) {
+        const post = await this.recordOutcome(id, outcome);
+        this.unsaved.delete(id);
+        if (post) processed.push(post);
+      }
+      await this.recover();
+
       for (;;) {
         const claimed = await this.update((posts) => {
           const now = this.now();
@@ -106,24 +133,21 @@ export class Scheduler<P = unknown> {
             .sort((a, b) => a.publish_at.localeCompare(b.publish_at))[0];
           if (!next) return undefined;
           next.status = 'publishing';
-          next.claimed_by = { pid: process.pid, at: now.toISOString() };
+          next.claimed_by = { pid: process.pid, instance: this.instance, at: now.toISOString() };
           next.updated_at = now.toISOString();
           return { id: next.id, payload: next.payload };
         });
         if (!claimed) break;
 
-        let outcome: Pick<ScheduledPost<P>, 'status' | 'result' | 'error'>;
+        let outcome: Outcome<P>;
         try {
           outcome = { status: 'published', result: await this.publish(claimed.payload), error: undefined };
         } catch (error) {
           outcome = { status: 'failed', error: describeError(error), result: undefined };
         }
-        const post = await this.update((posts) => {
-          const post = posts.find((p) => p.id === claimed.id);
-          if (!post) return undefined;
-          Object.assign(post, outcome, { updated_at: this.now().toISOString(), claimed_by: undefined });
-          return post;
-        });
+        this.unsaved.set(claimed.id, outcome);
+        const post = await this.recordOutcome(claimed.id, outcome);
+        this.unsaved.delete(claimed.id);
         if (post) processed.push(post);
       }
       return processed;
@@ -135,7 +159,8 @@ export class Scheduler<P = unknown> {
   /**
    * Marks posts stuck in "publishing" as failed when the process that claimed
    * them is gone. They are not re-posted automatically: the publish may have
-   * gone through before the crash.
+   * gone through before the crash. Runs on every tick, so a peer that dies
+   * while this server is running is noticed too.
    */
   async recover(): Promise<void> {
     await this.update((posts) => {
@@ -143,8 +168,12 @@ export class Scheduler<P = unknown> {
       for (const post of posts) {
         if (post.status !== 'publishing') continue;
         const claim = post.claimed_by;
-        const abandoned =
-          !claim || !processAlive(claim.pid) || now.getTime() - Date.parse(claim.at) > CLAIM_TIMEOUT_MS;
+        const expired = !claim || now.getTime() - Date.parse(claim.at) > CLAIM_TIMEOUT_MS;
+        let abandoned: boolean;
+        if (expired) abandoned = true;
+        else if (claim.instance === this.instance) abandoned = false; // ours: in flight or awaiting save
+        else if (claim.pid === process.pid) abandoned = true; // an earlier server that had our pid
+        else abandoned = !processAlive(claim.pid);
         if (!abandoned) continue;
         post.status = 'failed';
         post.error = 'Server stopped while publishing; check your profile before rescheduling.';
@@ -159,9 +188,7 @@ export class Scheduler<P = unknown> {
     const tick = () => {
       this.runDue().catch((error) => console.error('Scheduler error:', describeError(error)));
     };
-    this.recover()
-      .catch((error) => console.error('Scheduler error:', describeError(error)))
-      .finally(tick);
+    tick();
     this.timer = setInterval(tick, intervalMs);
     this.timer.unref();
   }
@@ -169,6 +196,15 @@ export class Scheduler<P = unknown> {
   stop() {
     clearInterval(this.timer);
     this.timer = undefined;
+  }
+
+  private recordOutcome(id: string, outcome: Outcome<P>) {
+    return this.update((posts) => {
+      const post = posts.find((p) => p.id === id);
+      if (!post) return undefined;
+      Object.assign(post, outcome, { updated_at: this.now().toISOString(), claimed_by: undefined });
+      return post;
+    });
   }
 
   /** Reads the file fresh each time so several server processes stay in sync. */
@@ -180,12 +216,17 @@ export class Scheduler<P = unknown> {
       if (error?.code === 'ENOENT') return [];
       throw error;
     }
+    let data: unknown;
     try {
-      const data = JSON.parse(raw);
-      return Array.isArray(data?.posts) ? data.posts : [];
+      data = JSON.parse(raw);
     } catch {
-      throw new Error(`Schedule file ${this.file} is not valid JSON; fix or move it before scheduling more posts.`);
+      data = undefined;
     }
+    const posts = (data as { posts?: unknown } | null | undefined)?.posts;
+    if (!Array.isArray(posts)) {
+      throw new Error(`Schedule file ${this.file} is not in the expected format; fix or move it before scheduling more posts.`);
+    }
+    return posts as ScheduledPost<P>[];
   }
 
   private async save(posts: ScheduledPost<P>[]) {
@@ -210,7 +251,8 @@ export class Scheduler<P = unknown> {
     const lock = `${this.file}.lock`;
     const token = randomUUID();
     await mkdir(dirname(this.file), { recursive: true, mode: 0o700 });
-    for (let attempt = 0; ; attempt++) {
+    const giveUpAt = Date.now() + LOCK_WAIT_MS;
+    for (;;) {
       try {
         const handle = await open(lock, 'wx', 0o600);
         await handle.writeFile(token);
@@ -219,7 +261,7 @@ export class Scheduler<P = unknown> {
       } catch (error: any) {
         if (error?.code !== 'EEXIST') throw error;
         if (await this.breakStaleLock(lock)) continue;
-        if (attempt > 200) throw new Error(`Schedule file is locked: ${lock}`);
+        if (Date.now() > giveUpAt) throw new Error(`Schedule file is locked: ${lock}`);
         await sleep(50);
       }
     }
@@ -233,28 +275,42 @@ export class Scheduler<P = unknown> {
   }
 
   /**
-   * Removes a lock left by a crashed process. The stale lock is first renamed
-   * to a unique name, so when two processes race only one of them wins and
-   * neither can delete a fresh lock the other just took.
+   * Removes a lock left by a crashed process. Breakers take turns through a
+   * second, short-lived lock, and only delete the main lock if it is still the
+   * same stale file they inspected — a live lock can't be replaced while it
+   * exists, so this never removes a lock another process just took.
    */
   private async breakStaleLock(lock: string): Promise<boolean> {
-    const age = await stat(lock).then((s) => Date.now() - s.mtimeMs, () => 0);
-    if (age <= STALE_LOCK_MS) return false;
-    const grave = `${lock}.${process.pid}.${randomUUID()}.stale`;
+    const age = await fileAge(lock);
+    if (age === undefined || age <= STALE_LOCK_MS) return false;
+    const breaker = `${lock}.break`;
     try {
-      await rename(lock, grave);
+      const handle = await open(breaker, 'wx', 0o600);
+      await handle.close();
+    } catch (error: any) {
+      if (error?.code !== 'EEXIST') throw error;
+      const breakerAge = await fileAge(breaker);
+      if (breakerAge !== undefined && breakerAge > STALE_BREAKER_MS) await unlink(breaker).catch(() => {});
+      return false;
+    }
+    try {
+      const before = await this.lockSnapshot(lock);
+      if (!before || Date.now() - before.mtimeMs <= STALE_LOCK_MS) return false;
+      const again = await this.lockSnapshot(lock);
+      if (!again || again.token !== before.token || again.mtimeMs !== before.mtimeMs) return false;
+      await unlink(lock).catch(() => {});
+      return true;
+    } finally {
+      await unlink(breaker).catch(() => {});
+    }
+  }
+
+  private async lockSnapshot(lock: string): Promise<{ token: string; mtimeMs: number } | undefined> {
+    try {
+      const [s, token] = await Promise.all([stat(lock), readFile(lock, 'utf8')]);
+      return { token, mtimeMs: s.mtimeMs };
     } catch {
-      return false;
+      return undefined;
     }
-    const stillStale = await stat(grave).then((s) => Date.now() - s.mtimeMs > STALE_LOCK_MS, () => false);
-    if (!stillStale) {
-      // We grabbed another process's fresh lock; put it back without overwriting
-      // a lock someone may have taken since (link fails if the path exists).
-      await link(grave, lock).catch(() => {});
-      await unlink(grave).catch(() => {});
-      return false;
-    }
-    await unlink(grave).catch(() => {});
-    return true;
   }
 }

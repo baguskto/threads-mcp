@@ -90,7 +90,7 @@ Configuration is read only from the environment your MCP client passes in. A `.e
 | `delete_thread` | Delete one of your posts |
 | `get_container_status` / `publish_container` | Inspect and publish a container later (drafts, or slow videos) |
 
-Video and image processing can take a while. A publish call waits up to 45 seconds (so it finishes before typical MCP client timeouts) and sends progress notifications while it waits; if the media is still processing after that, it returns the pending `container_id` instead of failing, and `publish_container` finishes the job. Cancelling a request stops it before anything is published.
+Video and image processing can take a while. Each publish call waits up to 45 seconds in total (so it finishes before typical MCP client timeouts) and sends progress notifications while it waits. If media is still processing after that, it returns the pending `container_id` instead of failing, and `publish_container` finishes the job; a thread chain returns the parts it published and where to resume. Cancelling a request stops it before anything further is published.
 
 ### Scheduling
 

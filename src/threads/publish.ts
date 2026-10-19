@@ -8,6 +8,11 @@ export interface PublishOptions {
   pollIntervalMs?: number;
   /** Stop waiting for media processing after this long. Meta suggests at most 5 minutes. */
   timeoutMs?: number;
+  /**
+   * Absolute time (ms since epoch) after which to stop waiting. Takes precedence
+   * over timeoutMs so several containers in one tool call share one budget.
+   */
+  deadline?: number;
   /** Aborts waiting (e.g. the MCP request was cancelled); nothing is published after an abort. */
   signal?: AbortSignal;
   /** Called after each status check that is still processing. */
@@ -49,9 +54,13 @@ function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-function throwIfAborted(signal: AbortSignal | undefined, containerId: string) {
+export function throwIfAborted(signal: AbortSignal | undefined, containerId?: string) {
   if (signal?.aborted) {
-    throw new Error(`Cancelled before publishing; container ${containerId} was not published (publish it later with publish_container).`);
+    throw new Error(
+      containerId
+        ? `Cancelled before publishing; container ${containerId} was not published (publish it later with publish_container).`
+        : 'Cancelled before publishing.',
+    );
   }
 }
 
@@ -71,14 +80,16 @@ export async function createContainer(client: ThreadsClient, params: Params): Pr
 export async function waitForContainer(
   client: ThreadsClient,
   containerId: string,
-  { pollIntervalMs = 10_000, timeoutMs = 300_000, signal, onProgress }: PublishOptions = {},
+  { pollIntervalMs = 10_000, timeoutMs = 300_000, deadline, signal, onProgress }: PublishOptions = {},
 ): Promise<ContainerStatus> {
   const started = Date.now();
+  const stopAt = deadline ?? started + timeoutMs;
   for (let attempt = 0; ; attempt++) {
     throwIfAborted(signal, containerId);
     const res = await client.get<{ status?: ContainerStatus; error_message?: string }>(`/${containerId}`, {
       fields: 'id,status,error_message',
     });
+    throwIfAborted(signal, containerId);
     const status = res.status ?? 'FINISHED';
     if (status === 'FINISHED' || status === 'PUBLISHED') return status;
     if (status === 'ERROR' || status === 'EXPIRED') {
@@ -87,7 +98,7 @@ export async function waitForContainer(
     const elapsed = Date.now() - started;
     onProgress?.({ containerId, elapsedMs: elapsed, status });
     const delay = Math.min(1_000 * 2 ** attempt, pollIntervalMs);
-    if (elapsed + delay > timeoutMs) throw new ContainerPendingError(containerId, elapsed);
+    if (Date.now() + delay > stopAt) throw new ContainerPendingError(containerId, elapsed);
     try {
       await abortableSleep(delay, signal);
     } catch {

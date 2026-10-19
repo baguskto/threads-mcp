@@ -29,6 +29,7 @@ A rewrite that brings the server up to date with the Threads API as of October 2
 - `THREADS_READ_ONLY=true` exposes only read tools.
 - Tool annotations (read-only / destructive / idempotent) and titles on every tool; server instructions warn the model to treat post content as untrusted data.
 - Publish calls honour MCP cancellation, send progress notifications while media processes, and return the pending container after `THREADS_PUBLISH_WAIT_SECONDS` (default 45) instead of running into client timeouts.
+- Automated test suite (`npm test`) against a mocked Threads API, and a GitHub Actions workflow for Node 20, 22 and 24.
 
 ### Security
 
@@ -37,7 +38,6 @@ A rewrite that brings the server up to date with the Threads API as of October 2
 - IDs passed to tools must be numeric and API paths are whitelisted, so a crafted ID can't reach other endpoints such as token refresh.
 - Pagination only follows links back to the configured API host.
 - The schedule file and its directory are created with owner-only permissions.
-- Automated test suite (`npm test`) against a mocked Threads API, and a GitHub Actions workflow for Node 20, 22 and 24.
 
 ### Fixed
 

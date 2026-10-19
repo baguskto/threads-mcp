@@ -157,17 +157,20 @@ export function threadsTextLength(text: string): number {
   return length;
 }
 
-const normalizeLink = (url: string) =>
-  url
+/** Strips the scheme, `www.` and trailing punctuation; lowercases only the host (paths are case-sensitive). */
+const normalizeLink = (url: string) => {
+  const bare = url
     .replace(/[).,!?'"]+$/, '')
     .replace(/^https?:\/\//i, '')
     .replace(/^www\./i, '')
-    .replace(/\/+$/, '')
-    .toLowerCase();
+    .replace(/\/+$/, '');
+  const slash = bare.indexOf('/');
+  return slash === -1 ? bare.toLowerCase() : bare.slice(0, slash).toLowerCase() + bare.slice(slash);
+};
 
 /** Unique links as Threads counts them, including scheme-less `www.` links. */
 export function countLinks(text = '', linkAttachment?: string): number {
-  const urls = new Set((text.match(/(?:https?:\/\/|www\.)[^\s]+/gi) ?? []).map(normalizeLink));
+  const urls = new Set((text.match(/(?:https?:\/\/|(?<![\w.])www\.)[^\s]+/gi) ?? []).map(normalizeLink));
   if (linkAttachment) urls.add(normalizeLink(linkAttachment));
   return urls.size;
 }

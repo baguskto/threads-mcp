@@ -7,6 +7,7 @@ import {
   createAndPublish,
   createContainer,
   publishContainer,
+  throwIfAborted,
   waitForContainer,
   type PublishOptions,
 } from '../threads/publish.js';
@@ -29,7 +30,9 @@ export const MAX_CAROUSEL_ITEMS = 20;
 /** Scheduled posts have no client waiting on them, so they can wait the full 5 minutes Meta suggests. */
 const SCHEDULED_WAIT_MS = 300_000;
 
-const text = z.string().max(MAX_TEXT_LENGTH).describe(`Post text (max ${MAX_TEXT_LENGTH} characters; up to 5 links)`);
+// The 500-character limit is enforced by checkText, which counts the way Threads does
+// (graphemes, emoji by byte length); a code-point max here would reject valid text.
+const text = z.string().max(10_000).describe(`Post text (max ${MAX_TEXT_LENGTH} characters as Threads counts them; up to 5 links)`);
 
 /** Accepts the v5 `media_type` + `media_url` pair alongside image_url/video_url. */
 const legacyMediaShape = {
@@ -110,10 +113,17 @@ const pendingResult = (containerId: string) => ({
 
 /**
  * Publishes now, or stops after creating the container when `publish` is false.
- * Media that is still processing when the wait budget runs out is returned as
- * a pending container instead of an error, so it can be finished later.
+ * For interactive calls, media that is still processing when the wait budget
+ * runs out is returned as a pending container so it can be finished later; the
+ * scheduler passes `pendingAsResult: false` so such a post is recorded as failed.
  */
-async function publishOrStage(ctx: ToolContext, params: Params, publish: boolean, options: PublishOptions) {
+async function publishOrStage(
+  ctx: ToolContext,
+  params: Params,
+  publish: boolean,
+  options: PublishOptions,
+  pendingAsResult = true,
+) {
   const client = ctx.client();
   const containerId = await createContainer(client, params);
   if (!publish) {
@@ -126,7 +136,7 @@ async function publishOrStage(ctx: ToolContext, params: Params, publish: boolean
   try {
     return await publishContainer(client, containerId, options);
   } catch (error) {
-    if (error instanceof ContainerPendingError) return pendingResult(containerId);
+    if (pendingAsResult && error instanceof ContainerPendingError) return pendingResult(containerId);
     throw error;
   }
 }
@@ -134,13 +144,14 @@ async function publishOrStage(ctx: ToolContext, params: Params, publish: boolean
 async function publishCarousel(
   ctx: ToolContext,
   input: CarouselInput & Target,
-  { publish = true, options }: { publish?: boolean; options: PublishOptions },
+  { publish = true, options, interactive = true }: { publish?: boolean; options: PublishOptions; interactive?: boolean },
 ) {
   checkText(input.text);
   const client = ctx.client();
   // Create item containers in order so the carousel keeps the requested sequence.
   const children: string[] = [];
   for (const item of input.items) {
+    throwIfAborted(options.signal);
     const isVideo = item.type === 'VIDEO' || (!item.type && /\.(mp4|mov|m4v)(\?|$)/i.test(item.url));
     children.push(
       await createContainer(client, {
@@ -151,16 +162,34 @@ async function publishCarousel(
       }),
     );
   }
+  // Items process in parallel on Meta's side; the shared deadline bounds the total
+  // wait, and the first failure stops the other polls.
+  const stopPolling = new AbortController();
+  const forwardAbort = () => stopPolling.abort();
+  options.signal?.addEventListener('abort', forwardAbort, { once: true });
   try {
-    for (const id of children) await waitForContainer(client, id, options);
+    await Promise.all(
+      children.map((id) =>
+        waitForContainer(client, id, { ...options, signal: stopPolling.signal }).catch((error) => {
+          stopPolling.abort();
+          throw error;
+        }),
+      ),
+    );
   } catch (error) {
+    throwIfAborted(options.signal);
     if (error instanceof ContainerPendingError) {
       throw new Error(
         `Carousel items are still processing (${error.containerId}); nothing was published. ` +
-          `Item containers: ${children.join(', ')}. Try again in a few minutes, or schedule the carousel instead.`,
+          (interactive
+            ? 'Retrying creates new item containers that need the same processing time, so instead raise ' +
+              'THREADS_PUBLISH_WAIT_SECONDS or use schedule_post (scheduled posts wait up to 5 minutes).'
+            : 'The items did not finish processing within 5 minutes; check the media files (format, size, length).'),
       );
     }
     throw error;
+  } finally {
+    options.signal?.removeEventListener('abort', forwardAbort);
   }
   const params = {
     media_type: 'CAROUSEL',
@@ -172,14 +201,14 @@ async function publishCarousel(
     quote_post_id: input.quote_post_id,
     ...buildPostOptions(input),
   };
-  const result = await publishOrStage(ctx, params, publish, options);
+  const result = await publishOrStage(ctx, params, publish, options, interactive);
   return { ...result, media_count: children.length, item_container_ids: children };
 }
 
 /** Publishes a payload saved by schedule_post. */
 export async function publishScheduled(ctx: ToolContext, payload: ScheduledPayload) {
   const options = { ...ctx.publish, timeoutMs: ctx.publish.timeoutMs ?? SCHEDULED_WAIT_MS };
-  if (payload.kind === 'carousel') return publishCarousel(ctx, payload.input, { options });
+  if (payload.kind === 'carousel') return publishCarousel(ctx, payload.input, { options, interactive: false });
   const { reply_to_id, quote_post_id, ...input } = payload.input;
   return createAndPublish(ctx.client(), singlePostParams(input, { reply_to_id, quote_post_id }), options);
 }
@@ -286,12 +315,39 @@ export function registerPublishingTools(server: McpServer, ctx: ToolContext) {
       });
       const published: Array<Record<string, unknown>> = [];
       let replyTo = parent_thread_id;
+      // Stop early with a resumable result rather than run into the client's timeout.
+      const incomplete = (index: number, reason: string, pendingContainer?: string) => ({
+        completed: false,
+        reason,
+        root_id: parent_thread_id ?? published[0]?.id,
+        count: published.length,
+        posts: published,
+        pending_container_id: pendingContainer,
+        resume: {
+          parent_thread_id: pendingContainer ? '(the media ID you get from publish_container)' : replyTo,
+          remaining_parts:
+            (pendingContainer ? index + 2 : index + 1) > parts.length
+              ? 'none'
+              : `${pendingContainer ? index + 2 : index + 1}–${parts.length}`,
+        },
+      });
       for (const [index, params] of parts.entries()) {
+        throwIfAborted(options.signal);
+        if (index > 0 && options.deadline !== undefined && Date.now() >= options.deadline) {
+          return incomplete(index, 'Time budget for this call used up; continue with the remaining parts.');
+        }
         try {
           const result = await createAndPublish(client, { ...params, reply_to_id: replyTo }, options);
           published.push({ position: index + 1, reply_to_id: replyTo, ...result });
           replyTo = result.id;
         } catch (error) {
+          if (error instanceof ContainerPendingError) {
+            return incomplete(
+              index,
+              `Part ${index + 1} is still processing. Publish container ${error.containerId} with publish_container, then continue.`,
+              error.containerId,
+            );
+          }
           // Report what made it out so the chain can be resumed.
           const done = published.map((p) => p.id);
           throw new Error(
@@ -304,7 +360,7 @@ export function registerPublishingTools(server: McpServer, ctx: ToolContext) {
           );
         }
       }
-      return { root_id: parent_thread_id ?? published[0]?.id, count: published.length, posts: published };
+      return { completed: true, root_id: parent_thread_id ?? published[0]?.id, count: published.length, posts: published };
     }),
   );
 

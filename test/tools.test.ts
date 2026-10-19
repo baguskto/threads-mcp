@@ -565,3 +565,163 @@ test('a scheduled carousel reply is published with reply_to_id', async () => {
   const carousel = creates.find((c) => param(c, 'media_type') === 'CAROUSEL')!;
   assert.equal(param(carousel, 'reply_to_id'), '42');
 });
+
+// Regression tests for the second review round.
+
+async function connectWith(routes: Routes, publish: { pollIntervalMs?: number; timeoutMs?: number }) {
+  const mock = mockFetch(routes);
+  const client = new ThreadsClient({ accessToken: 'tok', userId: '123', fetch: mock.fetch, sleep: async () => {} });
+  const { server } = createServer({ accessToken: 'tok' }, { client, publish, scheduler: false });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await server.connect(b);
+  const mcp = new Client({ name: 't', version: '1' });
+  await mcp.connect(a);
+  return { mcp, calls: mock.calls };
+}
+
+test('a thread chain stops with a resumable result once the call budget is used up', async () => {
+  const creates: RecordedCall[] = [];
+  const { mcp } = await connectWith(publishRoutes((c) => creates.push(c)), { pollIntervalMs: 0, timeoutMs: 0 });
+  const res: any = await mcp.callTool({ name: 'create_thread_chain', arguments: { replies: [{ text: '1' }, { text: '2' }, { text: '3' }] } });
+  assert.notEqual(res.isError, true, res.content[0].text);
+  const body = JSON.parse(res.content[0].text);
+  assert.equal(body.completed, false);
+  assert.equal(body.count, 1);
+  assert.equal(body.resume.parent_thread_id, '91001');
+  assert.equal(body.resume.remaining_parts, '2–3');
+  assert.equal(creates.length, 1, 'no container is created after the budget runs out');
+});
+
+test('a thread chain part that is still processing is returned as pending, not as an error', async () => {
+  const { mcp } = await connectWith(
+    {
+      'POST /123/threads': () => ({ id: '1001' }),
+      'GET /1001': () => ({ id: '1001', status: 'IN_PROGRESS' }),
+    },
+    { pollIntervalMs: 0, timeoutMs: 0 },
+  );
+  const res: any = await mcp.callTool({
+    name: 'create_thread_chain',
+    arguments: { parent_thread_id: '500', replies: [{ text: 'a', video_url: 'https://e.com/v.mp4' }] },
+  });
+  assert.notEqual(res.isError, true, res.content[0].text);
+  const body = JSON.parse(res.content[0].text);
+  assert.deepEqual([body.completed, body.pending_container_id, body.resume.remaining_parts], [false, '1001', 'none']);
+});
+
+test('a carousel shares one wait budget and explains what to do when items are slow', async () => {
+  const { mcp, calls } = await connectWith(
+    {
+      'POST /123/threads': () => ({ id: `100${calls.filter((c) => c.method === 'POST').length}` }),
+      'GET *': (c) => ({ id: c.url.pathname.split('/').pop(), status: 'IN_PROGRESS' }),
+    },
+    { pollIntervalMs: 0, timeoutMs: 0 },
+  );
+  const res: any = await mcp.callTool({
+    name: 'create_carousel_post',
+    arguments: { items: [{ url: 'https://e.com/1.mp4' }, { url: 'https://e.com/2.mp4' }] },
+  });
+  assert.equal(res.isError, true);
+  assert.match(res.content[0].text, /THREADS_PUBLISH_WAIT_SECONDS|schedule_post/);
+  assert.doesNotMatch(res.content[0].text, /Try again/);
+  assert.ok(!calls.some((c) => c.url.pathname.endsWith('/threads_publish')));
+});
+
+test('a scheduled carousel that is still processing fails instead of being recorded as published', async () => {
+  const { publishScheduled } = await import('../src/tools/publishing.js');
+  let n = 0;
+  const mock = mockFetch({
+    'POST /123/threads': () => ({ id: `100${++n}` }),
+    'GET *': (c) => {
+      const id = c.url.pathname.split('/').pop();
+      return { id, status: id === '1003' ? 'IN_PROGRESS' : 'FINISHED' };
+    },
+  });
+  const client = new ThreadsClient({ accessToken: 'tok', userId: '123', fetch: mock.fetch, sleep: async () => {} });
+  const ctx: any = { client: () => client, publish: { pollIntervalMs: 0, timeoutMs: 0 } };
+  await assert.rejects(
+    publishScheduled(ctx, { kind: 'carousel', input: { items: [{ url: 'https://e.com/1.jpg' }, { url: 'https://e.com/2.jpg' }] } }),
+    /still processing/,
+  );
+  assert.ok(!mock.calls.some((c) => c.url.pathname.endsWith('/threads_publish')));
+});
+
+test('progress notifications increase across all containers in one call', async () => {
+  const polls = new Map<string, number>();
+  const { mcp } = await connectWith(
+    {
+      'POST /123/threads': () => ({ id: `100${polls.size + 1}` }),
+      'GET *': (c) => {
+        const id = c.url.pathname.split('/').pop()!;
+        if (!id.startsWith('100')) return { id };
+        const seen = (polls.get(id) ?? 0) + 1;
+        polls.set(id, seen);
+        return { id, status: seen < 3 ? 'IN_PROGRESS' : 'FINISHED' };
+      },
+      'POST /123/threads_publish': (c) => ({ id: `9${param(c, 'creation_id')}` }),
+    },
+    { pollIntervalMs: 0 },
+  );
+  const progress: number[] = [];
+  const res: any = await mcp.callTool(
+    { name: 'create_carousel_post', arguments: { items: [{ url: 'https://e.com/1.jpg' }, { url: 'https://e.com/2.jpg' }] } },
+    { onprogress: (p: any) => progress.push(p.progress) },
+  );
+  assert.notEqual(res.isError, true, res.content[0].text);
+  assert.ok(progress.length >= 4, `got ${progress.length} progress notifications`);
+  for (let i = 1; i < progress.length; i++) assert.ok(progress[i] > progress[i - 1], `progress ${progress} increases`);
+});
+
+test('link counting ignores "www." inside words and keeps paths case-sensitive', async () => {
+  const { countLinks } = await import('../src/tools/post-options.js');
+  assert.equal(countLinks('Awww.... so cute'), 0);
+  assert.equal(countLinks('https://example.com/A https://EXAMPLE.com/a'), 2);
+  assert.equal(countLinks('https://Example.com/a https://example.com/a/'), 1);
+});
+
+test('text with combining marks is limited by Threads length, not code points', async () => {
+  const { call } = await connect(publishRoutes());
+  const thai = 'ที่'.repeat(200); // 200 graphemes, 600 code points
+  const res = await call('publish_thread', { text: thai });
+  assert.equal(res.isError, false, res.text);
+});
+
+test('THREADS_PUBLISH_WAIT_SECONDS accepts 0 and rejects negative values', async () => {
+  const { loadConfig } = await import('../src/config.js');
+  assert.equal(loadConfig({ THREADS_PUBLISH_WAIT_SECONDS: '0' }).publishWaitSeconds, 0);
+  assert.equal(loadConfig({ THREADS_PUBLISH_WAIT_SECONDS: '90' }).publishWaitSeconds, 90);
+  assert.equal(loadConfig({}).publishWaitSeconds, undefined);
+  assert.throws(() => loadConfig({ THREADS_PUBLISH_WAIT_SECONDS: '-5' }), /seconds/);
+});
+
+test('get_publishing_limit tells permission errors apart from other failures', async () => {
+  const { call } = await connect({
+    'GET /123/threads_publishing_limit': (c) => {
+      const fields = param(c, 'fields')!;
+      if (fields.startsWith('quota_usage')) return { data: [{ quota_usage: 1 }] };
+      if (fields.startsWith('delete')) return Response.json({ error: { message: 'Missing permission', code: 10 } }, { status: 403 });
+      return Response.json({ error: { message: 'Please retry', code: 2, is_transient: true } }, { status: 503 });
+    },
+  });
+  const res = await call('get_publishing_limit');
+  assert.equal(res.json.unavailable[0], 'delete_quota_usage, delete_config: needs threads_delete');
+  assert.match(res.json.unavailable[1], /Please retry/);
+});
+
+test('pagination behind a proxy base URL follows Graph next links through the proxy', async () => {
+  const mock = mockFetch({
+    'GET /threads-proxy/v1.0/123/threads': (c) =>
+      c.url.searchParams.get('after') === 'p2'
+        ? { data: [{ id: '3' }] }
+        : { data: [{ id: '1' }, { id: '2' }], paging: { next: 'https://graph.threads.net/v1.0/123/threads?after=p2' } },
+  });
+  const client = new ThreadsClient({
+    accessToken: 'tok',
+    userId: '123',
+    baseUrl: 'https://proxy.example.com/threads-proxy',
+    fetch: mock.fetch,
+  });
+  const items = await client.paginate<{ id: string }>('/123/threads', {}, 10);
+  assert.deepEqual(items.map((i) => i.id), ['1', '2', '3']);
+  assert.ok(mock.calls.every((c) => c.url.origin === 'https://proxy.example.com'));
+});
