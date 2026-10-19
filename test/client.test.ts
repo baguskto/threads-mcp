@@ -80,3 +80,11 @@ test('encodeParams drops empty values and joins arrays', () => {
   const params = encodeParams({ a: undefined, b: null, c: [], d: ['x', 'y'], e: false, f: 0 });
   assert.equal(params.toString(), 'd=x%2Cy&e=false&f=0');
 });
+
+test('absolute links must stay on the configured host and path', async () => {
+  const { client } = testClient({});
+  await assert.rejects(client.get('https://graph.threads.net.evil.com/v1.0/me'), /Refusing to follow/);
+  await assert.rejects(client.get('http://graph.threads.net/v1.0/me'), /Refusing to follow/);
+  const proxied = new ThreadsClient({ accessToken: 't', baseUrl: 'https://proxy.example.com/threads' });
+  await assert.rejects(proxied.get('https://proxy.example.com/threadsX/v1.0/me'), /Refusing to follow/);
+});

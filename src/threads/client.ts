@@ -134,7 +134,10 @@ export class ThreadsClient {
     if (/^https?:\/\//.test(path)) {
       // Only follow pagination links that point back at the configured API host.
       const url = new URL(path);
-      if (!`${url.origin}${url.pathname}`.startsWith(this.base)) throw new Error(`Refusing to follow a link to ${url.origin}`);
+      const base = new URL(this.base);
+      const prefix = base.pathname.replace(/\/+$/, '');
+      const underBase = !prefix || url.pathname === prefix || url.pathname.startsWith(`${prefix}/`);
+      if (url.origin !== base.origin || !underBase) throw new Error(`Refusing to follow a link to ${url.origin}${url.pathname}`);
       return url;
     }
     const normalized = path.startsWith('/') ? path : `/${path}`;
