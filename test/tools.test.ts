@@ -772,3 +772,28 @@ test('waiting uses the whole budget instead of giving up a poll interval early',
   const status = await waitForContainer(client, '1001', { pollIntervalMs: 10_000, deadline: Date.now() + 400 });
   assert.equal(status, 'FINISHED');
 });
+
+test('text chain parts that need a second status check still complete under a short media wait', async () => {
+  const checks = new Map<string, number>();
+  let n = 0;
+  const { mcp } = await connectWith(
+    {
+      'POST /123/threads': () => ({ id: `100${++n}` }),
+      'GET *': (c) => {
+        const id = c.url.pathname.split('/').pop()!;
+        if (!id.startsWith('100')) return { id };
+        const seen = (checks.get(id) ?? 0) + 1;
+        checks.set(id, seen);
+        return { id, status: seen < 2 ? 'IN_PROGRESS' : 'FINISHED' };
+      },
+      'POST /123/threads_publish': (c) => ({ id: `9${param(c, 'creation_id')}` }),
+    },
+    { pollIntervalMs: 0, timeoutMs: 0 },
+  );
+  const res: any = await mcp.callTool({
+    name: 'create_thread_chain',
+    arguments: { replies: [{ text: '1' }, { text: '2' }, { text: '3' }] },
+  });
+  const body = JSON.parse(res.content[0].text);
+  assert.deepEqual([body.completed, body.count], [true, 3]);
+});

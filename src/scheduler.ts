@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { readlinkSync } from 'node:fs';
 import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describeError } from './threads/errors.js';
 
@@ -17,7 +18,7 @@ export interface ScheduledPost<P = unknown> {
   error?: string;
   updated_at?: string;
   /** Which server instance is publishing it, so a restart can tell a crash from a peer still at work. */
-  claimed_by?: { pid: number; instance: string; at: string };
+  claimed_by?: { pid: number; instance: string; host: string; at: string };
 }
 
 type Outcome<P> = Pick<ScheduledPost<P>, 'status' | 'result' | 'error'>;
@@ -40,6 +41,23 @@ const EMPTY_LOCK_MS = 30_000;
 const LOCK_WAIT_MS = 30_000;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Where pids are meaningful: the hostname plus, on Linux, the pid namespace.
+ * Two Docker containers sharing the schedule file can both be pid 1, so a pid
+ * is only checked for liveness when the owner ran in the same place as us.
+ */
+export function hostTag(): string {
+  let namespace = '';
+  try {
+    namespace = readlinkSync('/proc/self/ns/pid');
+  } catch {
+    // Not Linux, or /proc is unavailable: the hostname alone has to do.
+  }
+  return `${hostname()}|${namespace}`.replace(/\s+/g, '_');
+}
+
+const HOST = hostTag();
 
 function processAlive(pid: number): boolean {
   try {
@@ -133,7 +151,7 @@ export class Scheduler<P = unknown> {
             .sort((a, b) => a.publish_at.localeCompare(b.publish_at))[0];
           if (!next) return undefined;
           next.status = 'publishing';
-          next.claimed_by = { pid: process.pid, instance: this.instance, at: now.toISOString() };
+          next.claimed_by = { pid: process.pid, instance: this.instance, host: HOST, at: now.toISOString() };
           next.updated_at = now.toISOString();
           return { id: next.id, payload: next.payload };
         });
@@ -172,6 +190,7 @@ export class Scheduler<P = unknown> {
         let abandoned: boolean;
         if (expired) abandoned = true;
         else if (claim.instance === this.instance) abandoned = false; // ours: in flight or awaiting save
+        else if (claim.host !== HOST) abandoned = false; // another host or container: can't check its pid
         else if (claim.pid === process.pid) abandoned = true; // an earlier server that had our pid
         else abandoned = !processAlive(claim.pid);
         if (!abandoned) continue;
@@ -256,7 +275,7 @@ export class Scheduler<P = unknown> {
 
   private async withLock<T>(fn: (assertHeld: () => Promise<void>) => Promise<T>): Promise<T> {
     const lock = `${this.file}.lock`;
-    const owner = `${process.pid} ${this.instance} ${randomUUID()}`;
+    const owner = `${process.pid} ${this.instance} ${randomUUID()} ${HOST}`;
     await mkdir(dirname(this.file), { recursive: true, mode: 0o700 });
     if (!(await this.acquire(lock, owner, this.lockWaitMs))) throw new Error(`Schedule file is busy (locked by another process): ${lock}`);
     const assertHeld = async () => {
@@ -293,9 +312,10 @@ export class Scheduler<P = unknown> {
 
   /** Whether the process and server instance named in a lock file are gone. */
   private ownerGone(content: string): boolean {
-    const [pidText, instance] = content.split(' ');
+    const [pidText, instance, , host] = content.split(' ');
     const pid = Number(pidText);
     if (!Number.isInteger(pid) || pid <= 0) return false; // still being written, or unknown: treat as alive
+    if (host !== HOST) return false; // another host or container: its pid means nothing here
     if (pid === process.pid) return instance !== this.instance; // an earlier server that had our pid
     return !processAlive(pid);
   }
@@ -312,7 +332,7 @@ export class Scheduler<P = unknown> {
     const first = await this.lockSnapshot(lock);
     if (!first || !this.abandoned(first)) return false;
     const breaker = `${lock}.break`;
-    const breakerOwner = `${process.pid} ${this.instance} ${randomUUID()}`;
+    const breakerOwner = `${process.pid} ${this.instance} ${randomUUID()} ${HOST}`;
     // Taking the break-lock must not wait: if another live breaker holds it, let it finish.
     if (!(await this.acquire(breaker, breakerOwner, 0))) return false;
     try {

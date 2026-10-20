@@ -339,7 +339,11 @@ export function registerPublishingTools(server: McpServer, ctx: ToolContext) {
           return incomplete(index, 'Time budget for this call used up; continue with the remaining parts.');
         }
         try {
-          const result = await createAndPublish(client, { ...params, reply_to_id: replyTo }, options);
+          // Text parts are normally ready at once; let them wait up to the chain's budget rather
+          // than the media budget, which a later part may already have used up.
+          const partOptions =
+            params.media_type === 'TEXT' ? { ...options, deadline: Math.max(options.deadline ?? 0, options.stopBy ?? 0) || undefined } : options;
+          const result = await createAndPublish(client, { ...params, reply_to_id: replyTo }, partOptions);
           published.push({ position: index + 1, reply_to_id: replyTo, ...result });
           replyTo = result.id;
         } catch (error) {

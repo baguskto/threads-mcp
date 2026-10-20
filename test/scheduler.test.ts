@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Scheduler } from '../src/scheduler.js';
+import { hostTag, Scheduler } from '../src/scheduler.js';
 
 async function withScheduler(fn: (ctx: { file: string; clock: { now: Date }; published: string[]; make: (fail?: boolean) => Scheduler<{ text: string }> }) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), 'threads-mcp-'));
@@ -115,7 +115,7 @@ test('recover() only fails posts whose publishing process is gone', () =>
       created_at: now,
       status: 'publishing',
       payload: { text: id },
-      claimed_by: { pid, instance: 'other-instance', at: now },
+      claimed_by: { pid, instance: 'other-instance', host: hostTag(), at: now },
     });
     // The parent (test runner) is alive; a claim with our own pid but another instance id is an earlier, dead server.
     await writeFile(
@@ -131,7 +131,7 @@ test('recover() only fails posts whose publishing process is gone', () =>
 
 test('a lock left by a crashed process is broken', () =>
   withScheduler(async ({ file, make }) => {
-    await writeFile(`${file}.lock`, `${2 ** 22 + 12345} dead-instance token`);
+    await writeFile(`${file}.lock`, `${2 ** 22 + 12345} dead-instance token ${hostTag()}`);
     const old = new Date(Date.now() - 60_000);
     await utimes(`${file}.lock`, old, old);
     const post = await make().add({ text: 'x' }, new Date('2026-01-02T00:00:00Z'));
@@ -142,17 +142,17 @@ test('a lock left by a crashed process is broken', () =>
 test('a lock held by a live (even stalled) process is never broken', () =>
   withScheduler(async ({ file, clock }) => {
     // The test runner's parent process is alive; pretend it has held the lock for 5 minutes.
-    await writeFile(`${file}.lock`, `${process.ppid} other-instance token`);
+    await writeFile(`${file}.lock`, `${process.ppid} other-instance token ${hostTag()}`);
     const old = new Date(Date.now() - 5 * 60_000);
     await utimes(`${file}.lock`, old, old);
     const scheduler = new Scheduler<{ text: string }>(file, async () => ({}), () => clock.now, 300);
     await assert.rejects(scheduler.add({ text: 'x' }, new Date('2026-01-02T00:00:00Z')), /busy/);
-    assert.equal(await readFile(`${file}.lock`, 'utf8'), `${process.ppid} other-instance token`);
+    assert.equal(await readFile(`${file}.lock`, 'utf8'), `${process.ppid} other-instance token ${hostTag()}`);
   }));
 
 test('an earlier server with the same pid counts as gone', () =>
   withScheduler(async ({ file, make }) => {
-    await writeFile(`${file}.lock`, `${process.pid} previous-instance token`);
+    await writeFile(`${file}.lock`, `${process.pid} previous-instance token ${hostTag()}`);
     const old = new Date(Date.now() - 60_000);
     await utimes(`${file}.lock`, old, old);
     assert.equal((await make().add({ text: 'x' }, new Date('2026-01-02T00:00:00Z'))).status, 'pending');
@@ -224,4 +224,29 @@ test('an empty lock (crash between create and write) is broken after a while', (
     const old = new Date(Date.now() - 60_000);
     await utimes(`${file}.lock`, old, old);
     assert.equal((await make().add({ text: 'x' }, new Date('2026-01-02T00:00:00Z'))).status, 'pending');
+  }));
+
+test('a lock or claim from another host or container is never judged by its pid', () =>
+  withScheduler(async ({ file, clock }) => {
+    // A dead-looking pid (or our own pid) means nothing when it comes from another pid namespace.
+    for (const pid of [2 ** 22 + 12345, process.pid]) {
+      await writeFile(`${file}.lock`, `${pid} peer-instance token other-container|pid:[1]`);
+      const old = new Date(Date.now() - 60_000);
+      await utimes(`${file}.lock`, old, old);
+      const scheduler = new Scheduler<{ text: string }>(file, async () => ({}), () => clock.now, 300);
+      await assert.rejects(scheduler.add({ text: 'x' }, new Date('2026-01-02T00:00:00Z')), /busy/);
+    }
+    const { unlink } = await import('node:fs/promises');
+    await unlink(`${file}.lock`);
+    const now = clock.now.toISOString();
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        posts: [{ id: 'p', publish_at: now, created_at: now, status: 'publishing', payload: { text: 'p' },
+          claimed_by: { pid: process.pid, instance: 'peer', host: 'other-container|pid:[1]', at: now } }],
+      }),
+    );
+    await new Scheduler<{ text: string }>(file, async () => ({}), () => clock.now).recover();
+    assert.equal(JSON.parse(await readFile(file, 'utf8')).posts[0].status, 'publishing');
   }));
