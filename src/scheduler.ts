@@ -26,12 +26,18 @@ export const defaultScheduleFile = () => join(homedir(), '.threads-mcp', 'schedu
 
 /** A claim older than this is treated as abandoned even if its process id is alive (pids get reused). */
 const CLAIM_TIMEOUT_MS = 30 * 60_000;
-/** The lock is only held for a file read and write, so one this old was left by a crashed process. */
-const STALE_LOCK_MS = 15_000;
-/** How long to keep trying for the lock; longer than STALE_LOCK_MS so a stale lock is broken first. */
+/**
+ * Locks name their owner (pid + server instance). A lock is broken only when
+ * that owner is gone and the lock is older than STALE_LOCK_MS, so a live but
+ * stalled holder (paused, starved threadpool) never loses it. ABANDONED_LOCK_MS
+ * is the fallback for owners we can't check (pid reused by another process).
+ */
+const STALE_LOCK_MS = 2_000;
+const ABANDONED_LOCK_MS = 10 * 60_000;
+/** An owner is written right after the lock is created; an empty lock this old was left by a crash in between. */
+const EMPTY_LOCK_MS = 30_000;
+/** How long to keep trying for the lock before reporting it as busy. */
 const LOCK_WAIT_MS = 30_000;
-/** The break-lock is held for a few milliseconds; one this old was left by a crash mid-break. */
-const STALE_BREAKER_MS = 5_000;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -42,13 +48,6 @@ function processAlive(pid: number): boolean {
   } catch (error: any) {
     return error?.code === 'EPERM';
   }
-}
-
-async function fileAge(path: string): Promise<number | undefined> {
-  return stat(path).then(
-    (s) => Date.now() - s.mtimeMs,
-    () => undefined,
-  );
 }
 
 /**
@@ -72,6 +71,7 @@ export class Scheduler<P = unknown> {
     private readonly file: string,
     private readonly publish: (payload: P) => Promise<unknown>,
     private readonly now: () => Date = () => new Date(),
+    private readonly lockWaitMs = LOCK_WAIT_MS,
   ) {}
 
   async add(payload: P, publishAt: Date): Promise<ScheduledPost<P>> {
@@ -229,86 +229,112 @@ export class Scheduler<P = unknown> {
     return posts as ScheduledPost<P>[];
   }
 
-  private async save(posts: ScheduledPost<P>[]) {
+  private async save(posts: ScheduledPost<P>[], assertHeld: () => Promise<void>) {
     await mkdir(dirname(this.file), { recursive: true, mode: 0o700 });
     const tmp = `${this.file}.${process.pid}.${randomUUID()}.tmp`;
     await writeFile(tmp, JSON.stringify({ version: 1, posts }, null, 2), { mode: 0o600 });
-    await rename(tmp, this.file);
+    try {
+      // Never replace the file unless we still own the lock.
+      await assertHeld();
+      await rename(tmp, this.file);
+    } catch (error) {
+      await unlink(tmp).catch(() => {});
+      throw error;
+    }
   }
 
   /** Loads, lets `fn` change the posts, and saves if anything changed — all under the lock. */
   private async update<T>(fn: (posts: ScheduledPost<P>[]) => T): Promise<T> {
-    return this.withLock(async () => {
+    return this.withLock(async (assertHeld) => {
       const posts = await this.load();
       const before = JSON.stringify(posts);
       const result = fn(posts);
-      if (JSON.stringify(posts) !== before) await this.save(posts);
+      if (JSON.stringify(posts) !== before) await this.save(posts, assertHeld);
       return result;
     });
   }
 
-  private async withLock<T>(fn: () => Promise<T>): Promise<T> {
+  private async withLock<T>(fn: (assertHeld: () => Promise<void>) => Promise<T>): Promise<T> {
     const lock = `${this.file}.lock`;
-    const token = randomUUID();
+    const owner = `${process.pid} ${this.instance} ${randomUUID()}`;
     await mkdir(dirname(this.file), { recursive: true, mode: 0o700 });
-    const giveUpAt = Date.now() + LOCK_WAIT_MS;
+    if (!(await this.acquire(lock, owner, this.lockWaitMs))) throw new Error(`Schedule file is busy (locked by another process): ${lock}`);
+    const assertHeld = async () => {
+      const current = await readFile(lock, 'utf8').catch(() => undefined);
+      if (current !== owner) throw new Error('Lost the schedule file lock; the change was not saved. Try again.');
+    };
+    try {
+      return await fn(assertHeld);
+    } finally {
+      if ((await readFile(lock, 'utf8').catch(() => undefined)) === owner) await unlink(lock).catch(() => {});
+    }
+  }
+
+  /** Creates `path` exclusively with `owner` as its content, breaking it only if its owner is gone. */
+  private async acquire(path: string, owner: string, waitMs: number): Promise<boolean> {
+    const giveUpAt = Date.now() + waitMs;
     for (;;) {
       try {
-        const handle = await open(lock, 'wx', 0o600);
-        await handle.writeFile(token);
-        await handle.close();
-        break;
+        const handle = await open(path, 'wx', 0o600);
+        try {
+          await handle.writeFile(owner);
+        } finally {
+          await handle.close();
+        }
+        return true;
       } catch (error: any) {
         if (error?.code !== 'EEXIST') throw error;
-        if (await this.breakStaleLock(lock)) continue;
-        if (Date.now() > giveUpAt) throw new Error(`Schedule file is locked: ${lock}`);
-        await sleep(50);
+        if (await this.breakAbandonedLock(path)) continue;
+        if (Date.now() > giveUpAt) return false;
+        await sleep(20 + Math.random() * 40); // jitter so waiting processes don't retry in lockstep
       }
     }
-    try {
-      return await fn();
-    } finally {
-      // Only remove the lock if it is still ours.
-      const owner = await readFile(lock, 'utf8').catch(() => undefined);
-      if (owner === token) await unlink(lock).catch(() => {});
-    }
+  }
+
+  /** Whether the process and server instance named in a lock file are gone. */
+  private ownerGone(content: string): boolean {
+    const [pidText, instance] = content.split(' ');
+    const pid = Number(pidText);
+    if (!Number.isInteger(pid) || pid <= 0) return false; // still being written, or unknown: treat as alive
+    if (pid === process.pid) return instance !== this.instance; // an earlier server that had our pid
+    return !processAlive(pid);
   }
 
   /**
-   * Removes a lock left by a crashed process. Breakers take turns through a
-   * second, short-lived lock, and only delete the main lock if it is still the
-   * same stale file they inspected — a live lock can't be replaced while it
-   * exists, so this never removes a lock another process just took.
+   * Removes a lock whose owner died. Breakers take turns through a second lock
+   * (itself owner-checked), and delete the main lock only if it is still the
+   * same file they judged abandoned. A live owner's lock is never removed.
    */
-  private async breakStaleLock(lock: string): Promise<boolean> {
-    const age = await fileAge(lock);
-    if (age === undefined || age <= STALE_LOCK_MS) return false;
+  private async breakAbandonedLock(lock: string): Promise<boolean> {
+    // Cheap check first: a lock younger than STALE_LOCK_MS is never broken, so skip reading it.
+    const mtimeMs = await stat(lock).then((s) => s.mtimeMs, () => undefined);
+    if (mtimeMs === undefined || Date.now() - mtimeMs <= STALE_LOCK_MS) return false;
+    const first = await this.lockSnapshot(lock);
+    if (!first || !this.abandoned(first)) return false;
     const breaker = `${lock}.break`;
+    const breakerOwner = `${process.pid} ${this.instance} ${randomUUID()}`;
+    // Taking the break-lock must not wait: if another live breaker holds it, let it finish.
+    if (!(await this.acquire(breaker, breakerOwner, 0))) return false;
     try {
-      const handle = await open(breaker, 'wx', 0o600);
-      await handle.close();
-    } catch (error: any) {
-      if (error?.code !== 'EEXIST') throw error;
-      const breakerAge = await fileAge(breaker);
-      if (breakerAge !== undefined && breakerAge > STALE_BREAKER_MS) await unlink(breaker).catch(() => {});
-      return false;
-    }
-    try {
-      const before = await this.lockSnapshot(lock);
-      if (!before || Date.now() - before.mtimeMs <= STALE_LOCK_MS) return false;
       const again = await this.lockSnapshot(lock);
-      if (!again || again.token !== before.token || again.mtimeMs !== before.mtimeMs) return false;
+      if (!again || again.content !== first.content || again.mtimeMs !== first.mtimeMs || !this.abandoned(again)) return false;
       await unlink(lock).catch(() => {});
       return true;
     } finally {
-      await unlink(breaker).catch(() => {});
+      if ((await readFile(breaker, 'utf8').catch(() => undefined)) === breakerOwner) await unlink(breaker).catch(() => {});
     }
   }
 
-  private async lockSnapshot(lock: string): Promise<{ token: string; mtimeMs: number } | undefined> {
+  private abandoned({ content, mtimeMs }: { content: string; mtimeMs: number }): boolean {
+    const age = Date.now() - mtimeMs;
+    if (!content.trim()) return age > EMPTY_LOCK_MS;
+    return (age > STALE_LOCK_MS && this.ownerGone(content)) || age > ABANDONED_LOCK_MS;
+  }
+
+  private async lockSnapshot(lock: string): Promise<{ content: string; mtimeMs: number } | undefined> {
     try {
-      const [s, token] = await Promise.all([stat(lock), readFile(lock, 'utf8')]);
-      return { token, mtimeMs: s.mtimeMs };
+      const [s, content] = await Promise.all([stat(lock), readFile(lock, 'utf8')]);
+      return { content, mtimeMs: s.mtimeMs };
     } catch {
       return undefined;
     }

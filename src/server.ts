@@ -103,8 +103,11 @@ export function createServer(config: Config, options: CreateServerOptions = {}) 
       return {
         ...basePublish,
         timeoutMs,
-        // One budget for the whole tool call, however many containers it waits on.
-        deadline: callStart + timeoutMs,
+        // One media-wait budget for the whole tool call, however many containers it waits on.
+        deadline: basePublish.deadline ?? callStart + timeoutMs,
+        // When multi-step tools stop starting new steps; never below the default, so a short
+        // media wait doesn't cut text-only thread chains short.
+        stopBy: basePublish.stopBy ?? callStart + Math.max(timeoutMs, DEFAULT_PUBLISH_WAIT_SECONDS * 1000),
         signal: req.mcpReq.signal,
         onProgress:
           progressToken === undefined

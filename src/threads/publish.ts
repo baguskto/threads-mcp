@@ -13,6 +13,8 @@ export interface PublishOptions {
    * over timeoutMs so several containers in one tool call share one budget.
    */
   deadline?: number;
+  /** Absolute time after which multi-step tools (thread chains) should stop starting new steps. */
+  stopBy?: number;
   /** Aborts waiting (e.g. the MCP request was cancelled); nothing is published after an abort. */
   signal?: AbortSignal;
   /** Called after each status check that is still processing. */
@@ -97,10 +99,11 @@ export async function waitForContainer(
     }
     const elapsed = Date.now() - started;
     onProgress?.({ containerId, elapsedMs: elapsed, status });
-    const delay = Math.min(1_000 * 2 ** attempt, pollIntervalMs);
-    if (Date.now() + delay > stopAt) throw new ContainerPendingError(containerId, elapsed);
+    // Use the whole budget: the last sleep is shortened to end at the deadline.
+    const remaining = stopAt - Date.now();
+    if (remaining <= 0) throw new ContainerPendingError(containerId, elapsed);
     try {
-      await abortableSleep(delay, signal);
+      await abortableSleep(Math.min(1_000 * 2 ** attempt, pollIntervalMs, remaining), signal);
     } catch {
       throwIfAborted(signal, containerId);
     }

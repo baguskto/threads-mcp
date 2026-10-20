@@ -129,14 +129,52 @@ test('recover() only fails posts whose publishing process is gone', () =>
     assert.equal(saved.find((p: any) => p.id === 'reused-pid').status, 'failed');
   }));
 
-test('a stale lock left by a crashed process is broken', () =>
+test('a lock left by a crashed process is broken', () =>
   withScheduler(async ({ file, make }) => {
-    await writeFile(`${file}.lock`, 'someone-else');
-    const old = new Date(Date.now() - 5 * 60_000);
+    await writeFile(`${file}.lock`, `${2 ** 22 + 12345} dead-instance token`);
+    const old = new Date(Date.now() - 60_000);
     await utimes(`${file}.lock`, old, old);
     const post = await make().add({ text: 'x' }, new Date('2026-01-02T00:00:00Z'));
     assert.equal(post.status, 'pending');
     await assert.rejects(stat(`${file}.lock`), /ENOENT/);
+  }));
+
+test('a lock held by a live (even stalled) process is never broken', () =>
+  withScheduler(async ({ file, clock }) => {
+    // The test runner's parent process is alive; pretend it has held the lock for 5 minutes.
+    await writeFile(`${file}.lock`, `${process.ppid} other-instance token`);
+    const old = new Date(Date.now() - 5 * 60_000);
+    await utimes(`${file}.lock`, old, old);
+    const scheduler = new Scheduler<{ text: string }>(file, async () => ({}), () => clock.now, 300);
+    await assert.rejects(scheduler.add({ text: 'x' }, new Date('2026-01-02T00:00:00Z')), /busy/);
+    assert.equal(await readFile(`${file}.lock`, 'utf8'), `${process.ppid} other-instance token`);
+  }));
+
+test('an earlier server with the same pid counts as gone', () =>
+  withScheduler(async ({ file, make }) => {
+    await writeFile(`${file}.lock`, `${process.pid} previous-instance token`);
+    const old = new Date(Date.now() - 60_000);
+    await utimes(`${file}.lock`, old, old);
+    assert.equal((await make().add({ text: 'x' }, new Date('2026-01-02T00:00:00Z'))).status, 'pending');
+  }));
+
+test('a write is refused if the lock was lost in the meantime', () =>
+  withScheduler(async ({ file, make }) => {
+    const scheduler = make();
+    await scheduler.add({ text: 'a' }, new Date('2026-01-02T00:00:00Z'));
+    // Simulate another process taking over the lock right before our save.
+    const original = (scheduler as any).load.bind(scheduler);
+    (scheduler as any).load = async () => {
+      const posts = await original();
+      await writeFile(`${file}.lock`, 'someone else');
+      return posts;
+    };
+    await assert.rejects(scheduler.add({ text: 'b' }, new Date('2026-01-03T00:00:00Z')), /Lost the schedule file lock/);
+    (scheduler as any).load = original;
+    await writeFile(`${file}.lock`, '');
+    const { unlink } = await import('node:fs/promises');
+    await unlink(`${file}.lock`);
+    assert.deepEqual((await scheduler.list()).map((p) => p.payload.text), ['a']);
   }));
 
 test('a corrupt schedule file is reported instead of being overwritten', () =>
@@ -178,4 +216,12 @@ test('an outcome that could not be saved is written on the next run, before anyt
     const [post] = await scheduler.runDue();
     assert.equal(post.status, 'published');
     assert.deepEqual(published, ['a'], 'not published twice');
+  }));
+
+test('an empty lock (crash between create and write) is broken after a while', () =>
+  withScheduler(async ({ file, make }) => {
+    await writeFile(`${file}.lock`, '');
+    const old = new Date(Date.now() - 60_000);
+    await utimes(`${file}.lock`, old, old);
+    assert.equal((await make().add({ text: 'x' }, new Date('2026-01-02T00:00:00Z'))).status, 'pending');
   }));

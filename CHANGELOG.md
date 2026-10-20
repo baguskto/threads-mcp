@@ -23,7 +23,7 @@ A rewrite that brings the server up to date with the Threads API as of October 2
 
 - Publishing options from the 2024–2026 API releases: polls, GIPHY GIFs, spoiler ranges and spoiler media, long-form text attachments with styling, ghost posts, reply approvals, topic tags, location tagging, country allowlists, link previews and Instagram Story cross-sharing.
 - New tools: `get_thread`, `get_conversation`, `get_my_replies`, `get_pending_replies`, `manage_pending_reply`, `lookup_profile`, `get_profile_posts`, `get_ghost_posts`, `get_poll_results`, `get_oembed`, `search_locations`, `get_location`, `get_recently_searched_keywords`, `get_container_status`, `publish_container`, `list_scheduled_posts`, `cancel_scheduled_post`, `refresh_access_token`, `exchange_for_long_lived_token`, `create_web_intent_link`.
-- Working local scheduler: scheduled posts are stored in `~/.threads-mcp/scheduled-posts.json` and published by the server one at a time, with a file lock and per-post claims so two running servers never publish the same post, and crash recovery that won't mark another live server's work as failed.
+- Working local scheduler: scheduled posts are stored in `~/.threads-mcp/scheduled-posts.json` and published by the server one at a time. A file lock that names its owner (and is only broken once that process is gone) plus per-post claims keep several running servers from publishing the same post, and crash recovery won't mark another live server's work as failed.
 - `publish: false` on `publish_thread` / `create_carousel_post` to create a draft container.
 - `get_content_performance_report` and `analyze_best_posting_times` are now computed from real per-post insights.
 - `THREADS_READ_ONLY=true` exposes only read tools.

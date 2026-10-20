@@ -124,6 +124,7 @@ async function publishOrStage(
   options: PublishOptions,
   pendingAsResult = true,
 ) {
+  throwIfAborted(options.signal);
   const client = ctx.client();
   const containerId = await createContainer(client, params);
   if (!publish) {
@@ -167,6 +168,7 @@ async function publishCarousel(
   const stopPolling = new AbortController();
   const forwardAbort = () => stopPolling.abort();
   options.signal?.addEventListener('abort', forwardAbort, { once: true });
+  if (options.signal?.aborted) stopPolling.abort(); // cancelled while the last item was being created
   try {
     await Promise.all(
       children.map((id) =>
@@ -333,7 +335,7 @@ export function registerPublishingTools(server: McpServer, ctx: ToolContext) {
       });
       for (const [index, params] of parts.entries()) {
         throwIfAborted(options.signal);
-        if (index > 0 && options.deadline !== undefined && Date.now() >= options.deadline) {
+        if (index > 0 && options.stopBy !== undefined && Date.now() >= options.stopBy) {
           return incomplete(index, 'Time budget for this call used up; continue with the remaining parts.');
         }
         try {

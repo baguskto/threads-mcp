@@ -568,7 +568,7 @@ test('a scheduled carousel reply is published with reply_to_id', async () => {
 
 // Regression tests for the second review round.
 
-async function connectWith(routes: Routes, publish: { pollIntervalMs?: number; timeoutMs?: number }) {
+async function connectWith(routes: Routes, publish: { pollIntervalMs?: number; timeoutMs?: number; stopBy?: number }) {
   const mock = mockFetch(routes);
   const client = new ThreadsClient({ accessToken: 'tok', userId: '123', fetch: mock.fetch, sleep: async () => {} });
   const { server } = createServer({ accessToken: 'tok' }, { client, publish, scheduler: false });
@@ -581,7 +581,8 @@ async function connectWith(routes: Routes, publish: { pollIntervalMs?: number; t
 
 test('a thread chain stops with a resumable result once the call budget is used up', async () => {
   const creates: RecordedCall[] = [];
-  const { mcp } = await connectWith(publishRoutes((c) => creates.push(c)), { pollIntervalMs: 0, timeoutMs: 0 });
+  // stopBy in the past: the budget is already used up after the first part.
+  const { mcp } = await connectWith(publishRoutes((c) => creates.push(c)), { pollIntervalMs: 0, stopBy: 0 });
   const res: any = await mcp.callTool({ name: 'create_thread_chain', arguments: { replies: [{ text: '1' }, { text: '2' }, { text: '3' }] } });
   assert.notEqual(res.isError, true, res.content[0].text);
   const body = JSON.parse(res.content[0].text);
@@ -724,4 +725,50 @@ test('pagination behind a proxy base URL follows Graph next links through the pr
   const items = await client.paginate<{ id: string }>('/123/threads', {}, 10);
   assert.deepEqual(items.map((i) => i.id), ['1', '2', '3']);
   assert.ok(mock.calls.every((c) => c.url.origin === 'https://proxy.example.com'));
+});
+
+test('a short media wait does not cut a text-only thread chain short', async () => {
+  const { mcp } = await connectWith(publishRoutes(), { pollIntervalMs: 0, timeoutMs: 0 });
+  const res: any = await mcp.callTool({
+    name: 'create_thread_chain',
+    arguments: { replies: [{ text: '1' }, { text: '2' }, { text: '3' }, { text: '4' }] },
+  });
+  const body = JSON.parse(res.content[0].text);
+  assert.deepEqual([body.completed, body.count], [true, 4]);
+});
+
+test('a cancel during the last carousel item stops polling and creates no carousel container', async () => {
+  const controller = new AbortController();
+  let posts = 0;
+  const { mcp, calls } = await connectWith(
+    {
+      'POST /123/threads': async () => {
+        posts++;
+        if (posts === 2) controller.abort(); // cancel while the last item container is being created
+        return { id: `100${posts}` };
+      },
+      'GET *': (c) => ({ id: c.url.pathname.split('/').pop(), status: 'FINISHED' }),
+    },
+    { pollIntervalMs: 0 },
+  );
+  await assert.rejects(
+    mcp.callTool(
+      { name: 'create_carousel_post', arguments: { items: [{ url: 'https://e.com/1.jpg' }, { url: 'https://e.com/2.jpg' }] } },
+      { signal: controller.signal },
+    ),
+  );
+  await new Promise((r) => setTimeout(r, 50));
+  const carousel = calls.filter((c) => c.method === 'POST' && c.body?.get('media_type') === 'CAROUSEL');
+  assert.equal(carousel.length, 0, 'no carousel container after cancel');
+  assert.ok(!calls.some((c) => c.url.pathname.endsWith('/threads_publish')));
+});
+
+test('waiting uses the whole budget instead of giving up a poll interval early', async () => {
+  const { waitForContainer } = await import('../src/threads/publish.js');
+  const readyAt = Date.now() + 250;
+  const mock = mockFetch({ 'GET /1001': () => ({ id: '1001', status: Date.now() >= readyAt ? 'FINISHED' : 'IN_PROGRESS' }) });
+  const client = new ThreadsClient({ accessToken: 'tok', userId: '123', fetch: mock.fetch });
+  // Poll interval (10 s) is far longer than the budget; the final sleep must be clamped to the deadline.
+  const status = await waitForContainer(client, '1001', { pollIntervalMs: 10_000, deadline: Date.now() + 400 });
+  assert.equal(status, 'FINISHED');
 });
