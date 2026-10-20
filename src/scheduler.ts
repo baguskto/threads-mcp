@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { readlinkSync } from 'node:fs';
+import { readFileSync, readlinkSync } from 'node:fs';
 import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
-import { homedir, hostname } from 'node:os';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describeError } from './threads/errors.js';
 
@@ -43,18 +43,26 @@ const LOCK_WAIT_MS = 30_000;
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * Where pids are meaningful: the hostname plus, on Linux, the pid namespace.
- * Two Docker containers sharing the schedule file can both be pid 1, so a pid
- * is only checked for liveness when the owner ran in the same place as us.
+ * Where pids are meaningful, so a pid is only checked for liveness when its
+ * owner ran in the same place as us. On Linux that is this kernel boot plus
+ * the pid namespace: two Docker containers sharing the schedule file can both
+ * be pid 1. Elsewhere (macOS, Windows) pids are machine-wide, so the platform
+ * is enough. The tag must not change while the machine is up, which rules
+ * out the hostname (macOS renames itself when it joins another network).
  */
 export function hostTag(): string {
-  let namespace = '';
   try {
-    namespace = readlinkSync('/proc/self/ns/pid');
+    const boot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+    let namespace = '';
+    try {
+      namespace = readlinkSync('/proc/self/ns/pid');
+    } catch {
+      // Namespace link unavailable; the boot id alone still identifies this kernel.
+    }
+    return `linux:${boot}|${namespace}`.replace(/\s+/g, '_');
   } catch {
-    // Not Linux, or /proc is unavailable: the hostname alone has to do.
+    return `local:${process.platform}`;
   }
-  return `${hostname()}|${namespace}`.replace(/\s+/g, '_');
 }
 
 const HOST = hostTag();

@@ -59,7 +59,7 @@ Ask the assistant to run `validate_setup`. It confirms the token works, shows wh
 | `THREADS_APP_SECRET` | no | Enables `exchange_for_long_lived_token` |
 | `THREADS_READ_ONLY` | no | `true` to expose only read tools (no publishing, deleting or scheduling) |
 | `THREADS_PUBLISH_WAIT_SECONDS` | no | How long a publish call waits for media processing before returning the pending container (default 45) |
-| `THREADS_SCHEDULE_FILE` | no | Where scheduled posts are stored (default `~/.threads-mcp/scheduled-posts.json`) |
+| `THREADS_SCHEDULE_FILE` | no | Where scheduled posts are stored (default `~/.threads-mcp/scheduled-posts.json`). Keep it on a local disk, not a network or synced folder |
 | `THREADS_API_VERSION` | no | Graph API version (default `v1.0`) |
 | `THREADS_API_BASE_URL` | no | Graph host (default `https://graph.threads.net`; must be HTTPS) |
 
