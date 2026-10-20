@@ -5,6 +5,58 @@ All notable changes to the Threads MCP Server project will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.0] - 2026-10-19
+
+A rewrite that brings the server up to date with the Threads API as of October 2026 and the current MCP SDK. Only endpoints Meta documents are used. See the README's "Migrating from v5" table for every renamed or removed tool.
+
+### Breaking
+
+- Requires Node.js 20+.
+- `.env` files are no longer loaded from the working directory; pass configuration through your MCP client's `env` block.
+- Removed tools that called endpoints the Threads API does not have: `like_post`, `unlike_post`, `get_post_likes`, `unrepost_thread`, `follow_user`, `unfollow_user`, `block_user`, `get_user_followers`, `get_user_following`, `get_trending_posts`, `search_users`.
+- Removed heuristic tools that returned canned or simulated results: `auto_hashtag_suggestions`, `content_optimization_analysis`, `bulk_post_management`, `website_integration_setup`, and the hard-coded posting-time recommendations.
+- Merged overlapping tools: `create_post_with_restrictions` → `publish_thread`; `search_mentions` → `get_mentions`; `search_by_hashtags` / `search_by_topics` → `search_posts` (`search_mode: "TAG"`); `get_enhanced_insights` / `get_engagement_trends` / `get_follower_growth_analytics` → `get_my_insights`.
+- `schedule_post` was defined twice (the second definition never ran). It is now a single tool taking `publish_at`.
+- `create_carousel_post` takes `items: [{ url, type?, alt_text? }]`; `get_thread_replies` / `get_conversation` take `oldest_first` instead of `reverse`.
+
+### Added
+
+- Publishing options from the 2024–2026 API releases: polls, GIPHY GIFs, spoiler ranges and spoiler media, long-form text attachments with styling, ghost posts, reply approvals, topic tags, location tagging, country allowlists, link previews and Instagram Story cross-sharing.
+- New tools: `get_thread`, `get_conversation`, `get_my_replies`, `get_pending_replies`, `manage_pending_reply`, `lookup_profile`, `get_profile_posts`, `get_ghost_posts`, `get_poll_results`, `get_oembed`, `search_locations`, `get_location`, `get_recently_searched_keywords`, `get_container_status`, `publish_container`, `list_scheduled_posts`, `cancel_scheduled_post`, `refresh_access_token`, `exchange_for_long_lived_token`, `create_web_intent_link`.
+- Working local scheduler: scheduled posts are stored in `~/.threads-mcp/scheduled-posts.json` and published by the server one at a time. A file lock that names its owner (and is only broken once that process is gone) plus per-post claims keep several running servers from publishing the same post, and crash recovery won't mark another live server's work as failed.
+- `publish: false` on `publish_thread` / `create_carousel_post` to create a draft container.
+- `get_content_performance_report` and `analyze_best_posting_times` are now computed from real per-post insights.
+- `THREADS_READ_ONLY=true` exposes only read tools.
+- Tool annotations (read-only / destructive / idempotent) and titles on every tool; server instructions warn the model to treat post content as untrusted data.
+- Publish calls honour MCP cancellation, send progress notifications while media processes, and return the pending container after `THREADS_PUBLISH_WAIT_SECONDS` (default 45) instead of running into client timeouts.
+- Automated test suite (`npm test`) against a mocked Threads API, and a GitHub Actions workflow for Node 20, 22 and 24.
+
+### Security
+
+- The server no longer reads a `.env` from the working directory, so an untrusted project can't redirect the token to another host or change the schedule file.
+- `THREADS_API_BASE_URL` must be HTTPS (plain HTTP only for localhost).
+- IDs passed to tools must be numeric and API paths are whitelisted, so a crafted ID can't reach other endpoints such as token refresh.
+- Pagination only follows links back to the configured API host.
+- The schedule file and its directory are created with owner-only permissions.
+
+### Fixed
+
+- Publishing waits for the media container to finish processing instead of publishing immediately, which failed for most videos and many images.
+- `manage_reply` used a non-existent `/manage` endpoint; it now calls `/manage_reply`.
+- `quote_post` sent `quoted_post_id`; the API parameter is `quote_post_id`.
+- `create_reply` and `quote_post` sent media as `media_url`, which the API ignores; they now send `image_url` / `video_url`.
+- Insights requests no longer ask for data before 2024-04-13 (the API rejects it) or send a date range with `followers_count`; date filters are normalised to Unix timestamps.
+- Text length is checked the way Threads counts it (emoji count as several characters), and posts with more than 5 links are rejected before sending.
+- `bulk_post_management` could loop forever re-fetching the first page.
+- The server reported version 4.0.1 in its handshake.
+
+### Changed
+
+- Migrated from `@modelcontextprotocol/sdk` 1.17 (low-level `Server`) to `@modelcontextprotocol/server` 2.3 (`McpServer.registerTool`), zod 3 → 4 and TypeScript 5 → 7.
+- Replaced axios and dotenv with Node's built-in `fetch` and `process.loadEnvFile`; runtime dependencies are now just the MCP SDK and zod.
+- Your user ID is looked up once and cached instead of on every call.
+- GET requests retry transient errors with backoff (honouring `Retry-After`); POST requests are never retried, so a post can't be published twice.
+
 ## [5.1.0] - 2024-08-25
 
 ### 🎠 CAROUSEL & SCHEDULING FIXES - Full 20-Image Support

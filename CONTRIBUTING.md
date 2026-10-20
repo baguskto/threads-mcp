@@ -38,11 +38,10 @@ cp .env.example .env
 # Run in development mode
 npm run dev
 
-# Build the project
+# Type-check, test and build
+npm run typecheck
+npm test
 npm run build
-
-# Run linting
-npm run lint
 ```
 
 ## 📝 Pull Request Process
@@ -50,7 +49,7 @@ npm run lint
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Make your changes
-4. Run `npm run lint` to check for issues
+4. Run `npm run typecheck` and `npm test`
 5. Commit with descriptive messages
 6. Push to your fork
 7. Open a Pull Request
@@ -73,22 +72,22 @@ Example: `feat: add bulk post scheduling feature`
 ```
 threads-mcp/
 ├── src/
-│   ├── index.ts          # Main server implementation
-│   └── api/
-│       ├── client.ts      # Threads API client
-│       └── types.ts       # TypeScript types
-├── tests/                 # Test files
-├── dist/                  # Compiled JavaScript (git-ignored)
-└── package.json          # Project configuration
+│   ├── index.ts          # Entry point (stdio transport)
+│   ├── server.ts         # Creates the McpServer and registers tool groups
+│   ├── config.ts         # Environment variables
+│   ├── scheduler.ts      # Local scheduled-post queue
+│   ├── threads/          # Threads API client, publishing flow, errors, field lists
+│   └── tools/            # One module per tool group (account, posts, publishing, replies, insights, search)
+├── test/                 # node:test suites run against a mocked Threads API
+├── tests/                # Legacy manual scripts (not run in CI)
+└── dist/                 # Compiled output (git-ignored)
 ```
 
 ## ✅ Testing
 
-When adding new features:
-1. Create test files in the `tests/` directory
-2. Follow the naming pattern: `test-feature-name.mjs`
-3. Test against the real Threads API when possible
-4. Document any API limitations discovered
+- Tests live in `test/*.test.ts` and run with `npm test` — no token needed.
+- Use the `mockFetch` / `testClient` helpers in `test/helpers.ts` to stub Threads API responses and assert on the requests the server sends.
+- Every new tool should have at least one test covering the request it makes.
 
 ## 📊 Code Style
 
@@ -100,19 +99,11 @@ When adding new features:
 
 ## 🚀 Adding New Tools
 
-When adding new MCP tools:
-
-1. Add tool definition in `ListToolsRequestSchema` handler
-2. Implement handler in `CallToolRequestSchema` switch
-3. Follow the existing pattern:
-   ```typescript
-   case 'your_tool_name':
-     // Implementation
-     break;
-   ```
-4. Add comprehensive error handling
-5. Document in README.md
-6. Update CHANGELOG.md
+1. Add the tool to the matching module in `src/tools/` with `server.registerTool(name, { title, description, inputSchema, annotations }, handler(...))`.
+2. Use a zod `inputSchema` and set `annotations.readOnlyHint` correctly — read-only mode relies on it.
+3. Only call endpoints documented at [developers.facebook.com/docs/threads](https://developers.facebook.com/docs/threads).
+4. Add a test in `test/tools.test.ts`.
+5. Document it in README.md and CHANGELOG.md.
 
 ## 📖 Documentation
 
@@ -123,11 +114,11 @@ When adding new MCP tools:
 
 ## 🔍 API Considerations
 
-Be aware of Threads API limitations:
-- Rate limits (50 posts/day, 2200 searches/day)
-- Permission requirements (threads_basic, threads_manage_insights)
-- Minimum follower requirements (100+ for demographics)
-- Features in development (carousel posts, native scheduling)
+Be aware of Threads API limitations (see LIMITASI_DAN_SOLUSI.md):
+- Rate limits: 250 posts, 1,000 replies, 100 deletes and 2,200 keyword searches per 24 hours
+- Advanced access is needed before search, profile lookup and mentions return other people's content
+- 100+ followers for demographics
+- No endpoints for likes, follows, follower lists or native scheduling
 
 ## 📦 Release Process
 
